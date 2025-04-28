@@ -1,0 +1,123 @@
+import logging
+from datetime import datetime, timedelta
+import pandas as pd
+
+logger = logging.getLogger(__name__)
+
+
+def generate_user_working_slots(task_calendar_df, leave_df, start_date, end_date):
+    """
+    Genera gli slot di lavoro disponibili per ogni task, tenendo conto del calendario
+    e delle assenze.
+
+    Args:
+        task_calendar_df (DataFrame): DataFrame con gli slot del calendario per ogni task
+        leave_df (DataFrame): DataFrame con le assenze per ogni task
+        start_date (datetime): Data di inizio per la generazione degli slot
+        end_date (datetime): Data di fine per la generazione degli slot
+
+    Returns:
+        dict: Dizionario con task_id come chiave e lista di datetime come valore
+    """
+    logger.info(f"Generazione slot di lavoro dal {start_date} al {end_date}")
+    slots_by_task = {}
+
+    for task_id in task_calendar_df["task_id"].unique():
+        task_slots = []
+        calendar = task_calendar_df[task_calendar_df["task_id"] == task_id]
+        leaves = leave_df[leave_df["task_id"] == task_id]
+
+        logger.debug(f"Elaborazione task_id: {task_id}, con {len(calendar)} slot di calendario e {len(leaves)} assenze")
+
+        current = start_date
+        while current < end_date:
+            dow = current.weekday()
+            day_calendar = calendar[calendar["dayofweek"].astype(int) == dow]
+            for _, row in day_calendar.iterrows():
+                for h in range(int(row["hour_from"]), int(row["hour_to"])):
+                    slot = current.replace(hour=h, minute=0, second=0, microsecond=0)
+                    if not is_in_leave(slot, leaves):
+                        task_slots.append(slot)
+            current += timedelta(days=1)
+
+        slots_by_task[task_id] = sorted(task_slots)
+        logger.debug(f"Task {task_id}: generati {len(task_slots)} slot disponibili")
+
+    return slots_by_task
+
+def is_in_leave(slot, leaves_df):
+    """
+    Verifica se uno slot temporale è all'interno di un periodo di assenza.
+
+    Args:
+        slot (datetime): Lo slot temporale da verificare
+        leaves_df (DataFrame): DataFrame con le assenze
+
+    Returns:
+        bool: True se lo slot è in un periodo di assenza, False altrimenti
+    """
+    for _, row in leaves_df.iterrows():
+        # Gestione dei diversi tipi di date (datetime o date)
+        date_from = row["date_from"]
+        date_to = row["date_to"]
+
+        if isinstance(date_from, datetime) and isinstance(slot, datetime):
+            if date_from <= slot <= date_to:
+                return True
+        else:
+            # Confronta solo le date senza l'orario
+            if isinstance(date_from, datetime):
+                date_from = date_from.date()
+            if isinstance(date_to, datetime):
+                date_to = date_to.date()
+            if isinstance(slot, datetime):
+                slot_date = slot.date()
+            else:
+                slot_date = slot
+
+            if date_from <= slot_date <= date_to:
+                return True
+
+    return False
+
+
+def format_schedule_output(solution_df, tasks_df):
+    """
+    Formatta l'output della soluzione in un formato leggibile.
+
+    Args:
+        solution_df (DataFrame): DataFrame con la soluzione dello scheduling
+        tasks_df (DataFrame): DataFrame con le informazioni sui task
+
+    Returns:
+        str: Stringa formattata con la pianificazione
+    """
+    output = []
+    output.append("PIANIFICAZIONE ATTIVITÀ\n")
+    output.append("=" * 80 + "\n")
+
+    # Raggruppa per data
+    solution_df["date"] = pd.to_datetime(solution_df["date"])
+    dates = solution_df["date"].dt.date.unique()
+
+    for date in sorted(dates):
+        output.append(f"\nData: {date.strftime('%d/%m/%Y')} ({date.strftime('%A')})\n")
+        output.append("-" * 80 + "\n")
+
+        # Filtra per data corrente
+        day_df = solution_df[solution_df["date"].dt.date == date]
+
+        # Ordina per ora e task
+        day_df = day_df.sort_values(["hour", "task_id"])
+
+        for _, row in day_df.iterrows():
+            task_id = row["task_id"]
+            task_name = row["task_name"]
+            hour = int(row["hour"])
+
+            # Formatta l'orario (es. 9:00 - 10:00)
+            time_slot = f"{hour:02d}:00 - {(hour+1):02d}:00"
+
+            output.append(f"{time_slot}  |  {task_name} (ID: {task_id})\n")
+
+    return "".join(output)

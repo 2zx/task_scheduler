@@ -1,0 +1,48 @@
+# File generati da Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Directory virtuali Python
+venv/
+ENV/
+env/
+.env
+
+# Log e output
+logs/
+*.log
+data/*.json
+
+# File di configurazione locali
+.env
+
+# Cache e file temporanei
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# IDE e editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
