@@ -22,6 +22,17 @@ def generate_user_working_slots(task_calendar_df, leave_df, start_date, end_date
     logger.info(f"Generazione slot di lavoro dal {start_date} al {end_date}")
     slots_by_task = {}
 
+    # Verifica che le date siano valide per prevenire loop infiniti
+    if start_date >= end_date:
+        logger.error("Data di inizio maggiore o uguale alla data di fine")
+        return slots_by_task
+
+    # Imposta un limite massimo di giorni per sicurezza (es. 90 giorni)
+    max_days = 90
+    if (end_date - start_date).days > max_days:
+        logger.warning(f"Intervallo di date troppo ampio, limitato a {max_days} giorni")
+        end_date = start_date + timedelta(days=max_days)
+
     for task_id in task_calendar_df["task_id"].unique():
         task_slots = []
         calendar = task_calendar_df[task_calendar_df["task_id"] == task_id]
@@ -56,27 +67,25 @@ def is_in_leave(slot, leaves_df):
     Returns:
         bool: True se lo slot è in un periodo di assenza, False altrimenti
     """
+    # Converti lo slot in date per un confronto coerente
+    if isinstance(slot, datetime):
+        slot_date = slot.date()
+    else:
+        slot_date = slot
+
     for _, row in leaves_df.iterrows():
-        # Gestione dei diversi tipi di date (datetime o date)
+        # Normalizza le date di inizio e fine
         date_from = row["date_from"]
         date_to = row["date_to"]
 
-        if isinstance(date_from, datetime) and isinstance(slot, datetime):
-            if date_from <= slot <= date_to:
-                return True
-        else:
-            # Confronta solo le date senza l'orario
-            if isinstance(date_from, datetime):
-                date_from = date_from.date()
-            if isinstance(date_to, datetime):
-                date_to = date_to.date()
-            if isinstance(slot, datetime):
-                slot_date = slot.date()
-            else:
-                slot_date = slot
+        if isinstance(date_from, datetime):
+            date_from = date_from.date()
+        if isinstance(date_to, datetime):
+            date_to = date_to.date()
 
-            if date_from <= slot_date <= date_to:
-                return True
+        # Ora confronta solo le date, non i datetime
+        if date_from <= slot_date <= date_to:
+            return True
 
     return False
 
@@ -92,32 +101,41 @@ def format_schedule_output(solution_df, tasks_df):
     Returns:
         str: Stringa formattata con la pianificazione
     """
+    # Controlla che solution_df non sia vuoto
+    if solution_df is None or solution_df.empty:
+        return "Nessuna pianificazione disponibile."
+
     output = []
     output.append("PIANIFICAZIONE ATTIVITÀ\n")
     output.append("=" * 80 + "\n")
 
-    # Raggruppa per data
-    solution_df["date"] = pd.to_datetime(solution_df["date"])
-    dates = solution_df["date"].dt.date.unique()
+    try:
+        # Raggruppa per data
+        solution_df["date"] = pd.to_datetime(solution_df["date"])
+        dates = solution_df["date"].dt.date.unique()
 
-    for date in sorted(dates):
-        output.append(f"\nData: {date.strftime('%d/%m/%Y')} ({date.strftime('%A')})\n")
-        output.append("-" * 80 + "\n")
+        for date in sorted(dates):
+            output.append(f"\nData: {date.strftime('%d/%m/%Y')} ({date.strftime('%A')})\n")
+            output.append("-" * 80 + "\n")
 
-        # Filtra per data corrente
-        day_df = solution_df[solution_df["date"].dt.date == date]
+            # Filtra per data corrente
+            day_df = solution_df[solution_df["date"].dt.date == date]
 
-        # Ordina per ora e task
-        day_df = day_df.sort_values(["hour", "task_id"])
+            # Ordina per ora e task
+            day_df = day_df.sort_values(["hour", "task_id"])
 
-        for _, row in day_df.iterrows():
-            task_id = row["task_id"]
-            task_name = row["task_name"]
-            hour = int(row["hour"])
+            for _, row in day_df.iterrows():
+                task_id = row["task_id"]
+                task_name = row["task_name"]
+                hour = int(row["hour"])
 
-            # Formatta l'orario (es. 9:00 - 10:00)
-            time_slot = f"{hour:02d}:00 - {(hour+1):02d}:00"
+                # Formatta l'orario (es. 9:00 - 10:00)
+                time_slot = f"{hour:02d}:00 - {(hour+1):02d}:00"
 
-            output.append(f"{time_slot}  |  {task_name} (ID: {task_id})\n")
+                output.append(f"{time_slot}  |  {task_name} (ID: {task_id})\n")
+
+    except Exception as e:
+        logger.error(f"Errore durante la formattazione dell'output: {str(e)}")
+        return "Errore nella formattazione dell'output della pianificazione."
 
     return "".join(output)

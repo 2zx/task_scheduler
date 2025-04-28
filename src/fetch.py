@@ -30,6 +30,10 @@ def get_pending_tasks(limit=20):
 
     try:
         conn, server = get_db_connection()
+        if conn is None:
+            logger.error("Impossibile connettersi al database per recuperare i task non completati")
+            return []
+
         cursor = conn.cursor()
         cursor.execute(query, (limit,))
         task_ids = [row[0] for row in cursor.fetchall()]
@@ -75,6 +79,10 @@ def get_tasks(task_ids=None):
 
     try:
         conn, server = get_db_connection()
+        if conn is None:
+            logger.error("Impossibile connettersi al database per recuperare le informazioni sui task")
+            return pd.DataFrame()
+
         df = pd.read_sql(query, conn, params=(task_ids,))
         logger.info(f"Recuperati dettagli per {len(df)} task")
         return df
@@ -118,6 +126,10 @@ def get_calendar_slots(task_ids=None):
 
     try:
         conn, server = get_db_connection()
+        if conn is None:
+            logger.error("Impossibile connettersi al database per recuperare gli slot di calendario")
+            return pd.DataFrame()
+
         df = pd.read_sql(query, conn, params=(task_ids,))
         logger.info(f"Recuperati {len(df)} slot di calendario")
         return df
@@ -162,7 +174,37 @@ def get_leaves(task_ids=None):
 
     try:
         conn, server = get_db_connection()
-        df = pd.read_sql(query, conn, params=(task_ids,))
+        if conn is None:
+            logger.error("Impossibile connettersi al database per recuperare le assenze")
+            return pd.DataFrame()
+
+        # Assicurati che task_ids sia una lista e non vuota
+        if not task_ids:
+            logger.warning("Lista di task vuota per il recupero delle assenze")
+            return pd.DataFrame()
+
+        # In PostgreSQL, per l'operatore ANY bisogna usare una lista
+        # Modifichiamo la query per usare IN invece di ANY
+        modified_query = '''
+            SELECT t.id as task_id, l.date_from, l.date_to
+            FROM project_task t
+            JOIN hr_employee e ON e.id = t.employee_id
+            JOIN hr_leave l ON l.employee_id = e.id
+            JOIN hr_leave_type lt on l.holiday_status_id = lt.id
+            WHERE l.state = 'validate' AND t.id IN %s
+            AND (lt.name not ilike '%%trasferta%%' AND lt.name not ilike '%%smart%%')
+        '''
+
+        # Convertiamo la lista in una tupla per l'operatore IN
+        task_ids_tuple = tuple(task_ids)
+
+        # Per un solo elemento, assicuriamoci che sia una tupla valida
+        if len(task_ids_tuple) == 1:
+            task_ids_tuple = (task_ids_tuple[0],)
+
+        # Formattiamo il parametro come richiesto da psycopg2
+        df = pd.read_sql(modified_query, conn, params=(task_ids_tuple,))
+
         logger.info(f"Recuperate {len(df)} assenze")
         return df
     except Exception as e:

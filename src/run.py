@@ -14,8 +14,13 @@ def main():
     logger.info("Avvio dell'applicazione di scheduling")
 
     try:
-        # Ottieni la connessione al database
+        # Ottieni la connessione al database con un timeout
+        logger.info("Tentativo di connessione al database...")
         conn, ssh_server = get_db_connection()
+
+        if conn is None:
+            logger.error("Impossibile stabilire una connessione al database. Terminazione.")
+            return
 
         # Recupera i dati necessari utilizzando la configurazione dai parametri
         # Non è necessario passare esplicitamente task_ids, lo farà la funzione stessa
@@ -72,8 +77,8 @@ def main():
         logger.exception(f"Errore durante l'esecuzione: {str(e)}")
 
     finally:
-        # Chiudi le connessioni
-        close_connection(conn, ssh_server)
+        # Chiudi le connessioni globali alla fine dell'esecuzione
+        close_connection()
         logger.info("Applicazione terminata")
 
 if __name__ == "__main__":
