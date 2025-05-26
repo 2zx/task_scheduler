@@ -1,7 +1,7 @@
 import pandas as pd
 import logging
 from .config import TASK_CONFIG
-from .db import get_db_connection
+from .db import get_db_connection, get_sqlalchemy_engine
 
 logger = logging.getLogger(__name__)
 
@@ -78,12 +78,12 @@ def get_tasks(task_ids=None):
     '''
 
     try:
-        conn, server = get_db_connection()
-        if conn is None:
+        engine = get_sqlalchemy_engine()
+        if engine is None:
             logger.error("Impossibile connettersi al database per recuperare le informazioni sui task")
             return pd.DataFrame()
 
-        df = pd.read_sql(query, conn, params=(task_ids,))
+        df = pd.read_sql(query, engine, params=(task_ids,))
         logger.info(f"Recuperati dettagli per {len(df)} task")
         return df
     except Exception as e:
@@ -125,12 +125,12 @@ def get_calendar_slots(task_ids=None):
     '''
 
     try:
-        conn, server = get_db_connection()
-        if conn is None:
+        engine = get_sqlalchemy_engine()
+        if engine is None:
             logger.error("Impossibile connettersi al database per recuperare gli slot di calendario")
             return pd.DataFrame()
 
-        df = pd.read_sql(query, conn, params=(task_ids,))
+        df = pd.read_sql(query, engine, params=(task_ids,))
         logger.info(f"Recuperati {len(df)} slot di calendario")
         return df
     except Exception as e:
@@ -162,19 +162,20 @@ def get_leaves(task_ids=None):
 
     logger.info(f"Recupero assenze per {len(task_ids)} task")
 
+    # Usa IN invece di ANY per compatibilità con SQLAlchemy
     query = '''
         SELECT t.id as task_id, l.date_from, l.date_to
         FROM project_task t
         JOIN hr_employee e ON e.id = t.employee_id
         JOIN hr_leave l ON l.employee_id = e.id
         JOIN hr_leave_type lt on l.holiday_status_id = lt.id
-        WHERE l.state = 'validate' AND t.id = ANY(%s)
-        AND (lt.name not ilike '%trasferta%' AND lt.name not ilike '%mart%')
+        WHERE l.state = 'validate' AND t.id IN %(task_ids)s
+        AND (lt.name not ilike '%%trasferta%%' AND lt.name not ilike '%%smart%%')
     '''
 
     try:
-        conn, server = get_db_connection()
-        if conn is None:
+        engine = get_sqlalchemy_engine()
+        if engine is None:
             logger.error("Impossibile connettersi al database per recuperare le assenze")
             return pd.DataFrame()
 
@@ -183,18 +184,6 @@ def get_leaves(task_ids=None):
             logger.warning("Lista di task vuota per il recupero delle assenze")
             return pd.DataFrame()
 
-        # In PostgreSQL, per l'operatore ANY bisogna usare una lista
-        # Modifichiamo la query per usare IN invece di ANY
-        modified_query = '''
-            SELECT t.id as task_id, l.date_from, l.date_to
-            FROM project_task t
-            JOIN hr_employee e ON e.id = t.employee_id
-            JOIN hr_leave l ON l.employee_id = e.id
-            JOIN hr_leave_type lt on l.holiday_status_id = lt.id
-            WHERE l.state = 'validate' AND t.id IN %s
-            AND (lt.name not ilike '%%trasferta%%' AND lt.name not ilike '%%smart%%')
-        '''
-
         # Convertiamo la lista in una tupla per l'operatore IN
         task_ids_tuple = tuple(task_ids)
 
@@ -202,8 +191,7 @@ def get_leaves(task_ids=None):
         if len(task_ids_tuple) == 1:
             task_ids_tuple = (task_ids_tuple[0],)
 
-        # Formattiamo il parametro come richiesto da psycopg2
-        df = pd.read_sql(modified_query, conn, params=(task_ids_tuple,))
+        df = pd.read_sql(query, engine, params={'task_ids': task_ids_tuple})
 
         logger.info(f"Recuperate {len(df)} assenze")
         return df

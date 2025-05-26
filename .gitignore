@@ -46,3 +46,4 @@ htmlcov/
 *.swp
 *.swo
 *~
+*.code-workspace

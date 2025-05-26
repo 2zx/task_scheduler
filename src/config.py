@@ -47,6 +47,12 @@ LOG_FILE = os.getenv("LOG_FILE", "/app/logs/scheduler.log")
 
 def setup_logging():
     """Configura il sistema di logging"""
+    root_logger = logging.getLogger()
+
+    # Se il logger è già configurato, non aggiungere handler duplicati
+    if root_logger.handlers:
+        return root_logger
+
     log_formatter = logging.Formatter(
         '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
@@ -65,7 +71,6 @@ def setup_logging():
     console_handler.setFormatter(log_formatter)
 
     # Configura il logger root
-    root_logger = logging.getLogger()
     root_logger.setLevel(getattr(logging, LOG_LEVEL))
     root_logger.addHandler(file_handler)
     root_logger.addHandler(console_handler)

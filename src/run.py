@@ -1,17 +1,131 @@
 import os
 import json
-
+import time
+import signal
+import cmd
+import logging
 
 from .config import setup_logging, SCIP_PARAMS
 from .fetch import get_tasks, get_calendar_slots, get_leaves
 from .db import get_db_connection, close_connection
 from .scheduler.model import SchedulingModel
 
-def main():
-    """Punto di ingresso principale per l'applicazione di scheduling"""
-    # Configura il logging
-    logger = setup_logging()
-    logger.info("Avvio dell'applicazione di scheduling")
+# Flag per controllare il flusso dell'applicazione
+running = True
+
+
+def signal_handler(sig, frame):
+    """Gestisce i segnali di interruzione in modo elegante"""
+    global running
+    print("\nRicevuto segnale di terminazione. Chiusura in corso...")
+    running = False
+
+
+class SchedulerShell(cmd.Cmd):
+    """Shell interattiva per il controllo dello scheduler"""
+    intro = 'Benvenuto nel Task Scheduler. Digita "help" o "?" per vedere i comandi disponibili.\n'
+    prompt = 'scheduler> '
+    logger = None
+
+    def __init__(self, logger):
+        super().__init__()
+        self.logger = logger
+
+    def do_run(self, arg):
+        """Esegue il processo di pianificazione: run [task_ids]
+        Se non vengono specificati task_ids, verranno utilizzati quelli configurati o i task pendenti."""
+        self.logger.info("Avvio manuale del processo di pianificazione")
+
+        # Parsing degli argomenti opzionali
+        task_ids = None
+        if arg:
+            try:
+                task_ids = [int(id.strip()) for id in arg.split() if id.strip()]
+                self.logger.info(f"Utilizzo dei task IDs specificati: {task_ids}")
+            except ValueError:
+                print("Errore: gli ID dei task devono essere numeri interi")
+                return
+
+        success = run_scheduler(task_ids)
+        if success:
+            print("\nPianificazione completata con successo.")
+        else:
+            print("\nLa pianificazione non è stata completata correttamente.")
+
+    def do_status(self, arg):
+        """Mostra lo stato attuale del sistema e le statistiche."""
+        try:
+            # Verifica la connessione al database
+            conn, ssh_server = get_db_connection()
+            if conn is None:
+                print("Stato: Database non disponibile")
+                return
+
+            # Controlla se esiste un file di output
+            output_exists = os.path.exists(SCIP_PARAMS['output_file'])
+
+            # Ottieni statistiche sui task pendenti
+            pending_count = len(get_tasks())
+
+            print("\nSTATO DEL SISTEMA:")
+            print("Database: Connesso")
+            print(f"File di output: {'Presente' if output_exists else 'Non presente'}")
+            print(f"Task pendenti: {pending_count}")
+
+            # Se esiste un file di output, mostra quando è stato generato
+            if output_exists:
+                mod_time = os.path.getmtime(SCIP_PARAMS['output_file'])
+                mod_time_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(mod_time))
+                print(f"Ultima pianificazione: {mod_time_str}")
+
+            # Chiudi la connessione
+            close_connection(conn, ssh_server)
+
+        except Exception as e:
+            print(f"Errore durante il recupero dello stato: {str(e)}")
+
+    def do_list(self, arg):
+        """Elenca i task pendenti disponibili per la pianificazione."""
+        try:
+            print("\nRecupero dei task pendenti in corso...")
+            tasks_df = get_tasks()
+
+            if tasks_df.empty:
+                print("Nessun task pendente trovato.")
+                return
+
+            print("\nTASK PENDENTI:")
+            print("-" * 80)
+            print(f"{'ID':<6} {'Nome':<50} {'Utente ID':<10} {'Ore pianificate':<15}")
+            print("-" * 80)
+
+            for _, row in tasks_df.iterrows():
+                print(f"{row['id']:<6} {row['name'][:48]:<50} {row['user_id']:<10} {row['planned_hours']:<15}")
+
+            print(f"\nTotale: {len(tasks_df)} task pendenti")
+
+        except Exception as e:
+            print(f"Errore durante il recupero dei task: {str(e)}")
+
+    def do_exit(self, arg):
+        """Esce dall'applicazione."""
+        print("Chiusura dell'applicazione...")
+        global running
+        running = False
+        return True
+
+    # Alias per la leggibilità
+    do_quit = do_exit
+
+    def emptyline(self):
+        """Non fare nulla quando viene premuto solo Invio."""
+        pass
+
+
+def run_scheduler(task_ids=None):
+    """Esegue il processo di pianificazione una volta"""
+    logger = logging.getLogger()
+    logger.info("Avvio del processo di scheduling")
 
     try:
         # Ottieni la connessione al database con un timeout
@@ -20,15 +134,14 @@ def main():
 
         if conn is None:
             logger.error("Impossibile stabilire una connessione al database. Terminazione.")
-            return
+            return False
 
         # Recupera i dati necessari utilizzando la configurazione dai parametri
-        # Non è necessario passare esplicitamente task_ids, lo farà la funzione stessa
-        tasks_df = get_tasks()
+        tasks_df = get_tasks(task_ids)
 
         if tasks_df.empty:
             logger.error("Nessun task trovato per la pianificazione")
-            return
+            return False
 
         task_ids = tasks_df['id'].tolist()
         logger.info(f"Pianificazione delle attività con IDs: {task_ids}")
@@ -70,16 +183,43 @@ def main():
                 print(f"  Giorni utilizzati: {len(dates)}")
                 print(f"  Date: {', '.join(sorted(dates))}")
                 print()
+
+            return True
         else:
             logger.error("Impossibile trovare una soluzione valida")
+            return False
 
     except Exception as e:
         logger.exception(f"Errore durante l'esecuzione: {str(e)}")
+        return False
 
     finally:
         # Chiudi le connessioni globali alla fine dell'esecuzione
         close_connection()
-        logger.info("Applicazione terminata")
+
+
+def main():
+    """Punto di ingresso principale per l'applicazione di scheduling"""
+    # Configura il logging
+    logger = setup_logging()
+    logger.info("Avvio dell'applicazione di scheduling in modalità interattiva")
+
+    # Registra handler per i segnali per la chiusura controllata
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
+    # Modalità interattiva
+    shell = SchedulerShell(logger)
+
+    try:
+        shell.cmdloop()
+    except KeyboardInterrupt:
+        print("\nInterruzione ricevuta, chiusura in corso...")
+    except Exception as e:
+        logger.exception(f"Errore imprevisto: {str(e)}")
+
+    logger.info("Applicazione terminata")
+
 
 if __name__ == "__main__":
     main()

@@ -1,5 +1,6 @@
 import logging
 import psycopg2
+from sqlalchemy import create_engine
 from sshtunnel import SSHTunnelForwarder
 from .config import DB_PARAMS, SSH_PARAMS
 
@@ -8,6 +9,73 @@ logger = logging.getLogger(__name__)
 # Variabili globali per memorizzare le connessioni
 _connection = None
 _ssh_server = None
+_engine = None
+
+
+def get_sqlalchemy_engine():
+    """
+    Crea o restituisce un engine SQLAlchemy esistente per l'uso con pandas.
+
+    Returns:
+        sqlalchemy.Engine: Engine SQLAlchemy per pandas
+    """
+    global _engine, _ssh_server
+
+    # Se esiste già un engine valido, lo restituisce
+    if _engine is not None:
+        try:
+            # Testa la connessione
+            with _engine.connect() as conn:
+                conn.execute("SELECT 1")
+            logger.debug("Riutilizzo engine SQLAlchemy esistente")
+            return _engine
+        except Exception as e:
+            logger.warning(f"Engine SQLAlchemy esistente non più valido: {str(e)}")
+            _engine = None
+
+    # Se non esiste un engine valido, ne crea uno nuovo
+    try:
+        # Se il tunnel SSH è abilitato, crealo se non esiste già
+        if SSH_PARAMS["enabled"]:
+            if _ssh_server is None or not _ssh_server.is_active:
+                logger.info(f"Creazione tunnel SSH verso {SSH_PARAMS['ssh_host']}")
+                _ssh_server = SSHTunnelForwarder(
+                    (SSH_PARAMS["ssh_host"], SSH_PARAMS["ssh_port"]),
+                    ssh_username=SSH_PARAMS["ssh_username"],
+                    ssh_pkey=SSH_PARAMS["ssh_key_path"],
+                    remote_bind_address=(
+                        SSH_PARAMS["remote_bind_host"],
+                        SSH_PARAMS["remote_bind_port"]
+                    )
+                )
+                _ssh_server.start()
+                logger.info(f"Tunnel SSH stabilito sulla porta locale {_ssh_server.local_bind_port}")
+
+            # Crea la stringa di connessione per SQLAlchemy
+            connection_string = (
+                f"postgresql://{DB_PARAMS['user']}:{DB_PARAMS['password']}"
+                f"@localhost:{_ssh_server.local_bind_port}/{DB_PARAMS['database']}"
+            )
+        else:
+            # Crea la stringa di connessione per SQLAlchemy senza tunnel
+            connection_string = (
+                f"postgresql://{DB_PARAMS['user']}:{DB_PARAMS['password']}"
+                f"@{DB_PARAMS['host']}:{DB_PARAMS['port']}/{DB_PARAMS['database']}"
+            )
+
+        # Crea l'engine SQLAlchemy
+        _engine = create_engine(connection_string, pool_pre_ping=True)
+        logger.info("Engine SQLAlchemy creato con successo")
+
+        return _engine
+
+    except Exception as e:
+        logger.error(f"Errore durante la creazione dell'engine SQLAlchemy: {str(e)}")
+        if _ssh_server and _ssh_server.is_active:
+            _ssh_server.stop()
+            _ssh_server = None
+        return None
+
 
 def get_db_connection():
     """
@@ -88,7 +156,7 @@ def close_connection(conn=None, ssh_server=None):
         conn: La connessione al database (opzionale)
         ssh_server: Il server SSH tunnel (opzionale)
     """
-    global _connection, _ssh_server
+    global _connection, _ssh_server, _engine
 
     # Se non vengono specificati parametri, utilizza le variabili globali
     if conn is None:
@@ -106,6 +174,15 @@ def close_connection(conn=None, ssh_server=None):
         # Se era la connessione globale, resetta la variabile
         if conn is _connection:
             _connection = None
+
+    # Chiudi l'engine SQLAlchemy se esiste
+    if _engine is not None:
+        try:
+            _engine.dispose()
+            logger.info("Engine SQLAlchemy chiuso")
+        except Exception as e:
+            logger.warning(f"Errore durante la chiusura dell'engine SQLAlchemy: {str(e)}")
+        _engine = None
 
     if ssh_server and ssh_server.is_active:
         try:
