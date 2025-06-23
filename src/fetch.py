@@ -118,7 +118,7 @@ def get_calendar_slots(task_ids=None):
     query = '''
         SELECT t.id as task_id, rca.dayofweek, rca.hour_from, rca.hour_to
         FROM project_task t
-        JOIN hr_employee e ON e.id = t.employee_id
+        JOIN hr_employee e ON e.user_id = t.user_id
         JOIN resource_calendar rc ON rc.id = e.resource_calendar_id
         JOIN resource_calendar_attendance rca ON rca.calendar_id = rc.id
         WHERE t.id = ANY(%s)
@@ -166,7 +166,7 @@ def get_leaves(task_ids=None):
     query = '''
         SELECT t.id as task_id, l.date_from, l.date_to
         FROM project_task t
-        JOIN hr_employee e ON e.id = t.employee_id
+        JOIN hr_employee e ON e.user_id = t.user_id
         JOIN hr_leave l ON l.employee_id = e.id
         JOIN hr_leave_type lt on l.holiday_status_id = lt.id
         WHERE l.state = 'validate' AND t.id IN %(task_ids)s

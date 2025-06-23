@@ -1,10 +1,9 @@
 import logging
 import pandas as pd
-import numpy as np
 from datetime import datetime, timedelta
-from pyscipopt import Model, quicksum
+from ortools.sat.python import cp_model
 
-from ..config import SCIP_PARAMS
+from ..config import ORTOOLS_PARAMS
 
 logger = logging.getLogger(__name__)
 
@@ -12,7 +11,7 @@ logger = logging.getLogger(__name__)
 class SchedulingModel:
     """
     Modello di ottimizzazione per la pianificazione delle attività
-    utilizzando SCIP come solutore.
+    utilizzando Google OrTools CP-SAT come solutore.
     """
 
     def __init__(self, tasks_df, calendar_slots_df, leaves_df):
@@ -28,6 +27,7 @@ class SchedulingModel:
         self.calendar_slots_df = calendar_slots_df
         self.leaves_df = leaves_df
         self.model = None
+        self.solver = None
         self.vars = {}
         self.solution = None
 
@@ -58,11 +58,21 @@ class SchedulingModel:
         # Mappa gli slot disponibili per ogni task
         self.available_slots = {}
 
+        # Debug: stampa i dati del calendario
+        logger.debug(f"Calendar slots DataFrame shape: {self.calendar_slots_df.shape}")
+        logger.debug(f"Calendar slots columns: {list(self.calendar_slots_df.columns)}")
+
+        if self.calendar_slots_df.empty:
+            logger.warning("Nessun slot di calendario disponibile!")
+            return
+
         for _, row in self.calendar_slots_df.iterrows():
             task_id = row['task_id']
             day = row['dayofweek']
             hour_from = row['hour_from']
             hour_to = row['hour_to']
+
+            logger.debug(f"Processing calendar slot: task_id={task_id}, day={day}, hours={hour_from}-{hour_to}")
 
             # Calcola gli slot orari (es. 9-10, 10-11, etc.)
             hours = list(range(int(hour_from), int(hour_to)))
@@ -75,24 +85,10 @@ class SchedulingModel:
 
             self.available_slots[task_id][day].extend(hours)
 
-        # In alternativa, possiamo usare la funzione generate_user_working_slots
-        # per un approccio più dettagliato, decommentando il codice seguente:
-        """
-        from .utils import generate_user_working_slots
-
-        # Definisci l'intervallo di date per la pianificazione
-        today = datetime.now().date()
-        start_date = datetime.combine(today, datetime.min.time())
-        end_date = datetime.combine(today + timedelta(days=28), datetime.min.time())
-
-        # Genera gli slot di lavoro disponibili
-        self.working_slots = generate_user_working_slots(
-            self.calendar_slots_df,
-            self.leaves_df,
-            start_date,
-            end_date
-        )
-        """
+        logger.info(f"Prepared available slots for {len(self.available_slots)} tasks")
+        for task_id, slots in self.available_slots.items():
+            total_hours = sum(len(hours) for hours in slots.values())
+            logger.debug(f"Task {task_id}: {len(slots)} days, {total_hours} total hours")
 
     def _prepare_leaves(self):
         """Prepara i dati sulle assenze, convertendoli in giorni non disponibili"""
@@ -113,55 +109,78 @@ class SchedulingModel:
                 current_date += timedelta(days=1)
 
     def build_model(self):
-        """Costruisce il modello di ottimizzazione SCIP"""
-        logger.info("Costruzione del modello di ottimizzazione")
+        """Costruisce il modello di ottimizzazione OrTools CP-SAT"""
+        logger.info("Costruzione del modello di ottimizzazione OrTools")
 
-        # Inizializza il modello SCIP
-        self.model = Model("TaskScheduling")
+        # Inizializza il modello CP-SAT
+        self.model = cp_model.CpModel()
+        self.solver = cp_model.CpSolver()
 
         # Configura i parametri del solutore
-        self.model.setParam('limits/time', SCIP_PARAMS['time_limit'])
-        self.model.setParam('limits/gap', SCIP_PARAMS['gap_limit'])
-        self.model.setParam('parallel/maxnthreads', SCIP_PARAMS['threads'])
+        self.solver.parameters.max_time_in_seconds = ORTOOLS_PARAMS['time_limit']
+        self.solver.parameters.num_search_workers = ORTOOLS_PARAMS['num_search_workers']
+        self.solver.parameters.log_search_progress = ORTOOLS_PARAMS['log_search_progress']
 
         # Definisci le variabili di decisione e i vincoli
         self._create_variables()
         self._create_constraints()
         self._create_objective()
 
-        logger.info("Modello di ottimizzazione costruito")
+        logger.info("Modello di ottimizzazione OrTools costruito")
         return self.model
 
     def _create_variables(self):
         """Crea le variabili di decisione per il modello"""
-        # Variabile binaria x[t,d,h] = 1 se il task t è schedulato nel giorno d all'ora h
+        # Variabile booleana x[t,d,h] = True se il task t è schedulato nel giorno d all'ora h
         self.vars['x'] = {}
+
+        logger.debug("Creating variables...")
+        variables_created = 0
 
         for _, task in self.tasks_df.iterrows():
             task_id = task['id']
+            logger.debug(f"Creating variables for task {task_id}")
+
+            task_variables = 0
             for d in self.days:
                 weekday = d.weekday()
 
                 # Salta i giorni in cui il task non può essere eseguito
                 if task_id in self.unavailable_days and d in self.unavailable_days[task_id]:
+                    logger.debug(f"  Skipping {d} (unavailable day)")
                     continue
 
                 # Salta i giorni della settimana non disponibili nel calendario
-                if task_id not in self.available_slots or weekday not in self.available_slots[task_id]:
+                if task_id not in self.available_slots:
+                    logger.debug(f"  Task {task_id} not in available_slots")
+                    continue
+
+                if weekday not in self.available_slots[task_id]:
+                    logger.debug(f"  Weekday {weekday} not available for task {task_id}")
                     continue
 
                 for h in self.available_slots[task_id][weekday]:
                     var_name = f"x_{task_id}_{d.strftime('%Y%m%d')}_{h}"
-                    self.vars['x'][task_id, d, h] = self.model.addVar(
-                        vtype="B", name=var_name
-                    )
+                    self.vars['x'][task_id, d, h] = self.model.NewBoolVar(var_name)
+                    variables_created += 1
+                    task_variables += 1
+
+            logger.debug(f"  Created {task_variables} variables for task {task_id}")
+
+        logger.info(f"Total variables created: {variables_created}")
+
+        if variables_created == 0:
+            logger.error("NO VARIABLES CREATED! This will cause the model to have no solution.")
+            logger.error("Available slots summary:")
+            for task_id, slots in self.available_slots.items():
+                logger.error(f"  Task {task_id}: {list(slots.keys())} weekdays")
 
     def _create_constraints(self):
         """Crea i vincoli per il modello"""
         # Vincolo: ogni task deve essere pianificato per il numero di ore richiesto
         for _, task in self.tasks_df.iterrows():
             task_id = task['id']
-            planned_hours = task['planned_hours']
+            planned_hours = int(task['planned_hours'])
 
             task_vars = [
                 self.vars['x'][task_id, d, h]
@@ -171,10 +190,7 @@ class SchedulingModel:
             ]
 
             if task_vars:  # Controlla che ci siano variabili disponibili
-                self.model.addCons(
-                    quicksum(task_vars) == planned_hours,
-                    name=f"planned_hours_{task_id}"
-                )
+                self.model.Add(sum(task_vars) == planned_hours)
 
         # Vincolo: una risorsa può svolgere al massimo un'attività per ogni slot orario
         for d in self.days:
@@ -190,15 +206,11 @@ class SchedulingModel:
                     ]
 
                     if len(slot_vars) > 1:  # Se c'è più di una variabile, aggiungi il vincolo
-                        self.model.addCons(
-                            quicksum(slot_vars) <= 1,
-                            name=f"one_task_per_slot_{user_id}_{d.strftime('%Y%m%d')}_{h}"
-                        )
+                        self.model.Add(sum(slot_vars) <= 1)
 
     def _create_objective(self):
         """Crea la funzione obiettivo del modello"""
         # Obiettivo: minimizzare la dispersione delle attività (preferire slot contigui)
-        # Questo è solo un esempio, puoi modificarlo in base alle tue esigenze
 
         # Variabili ausiliarie per rilevare se un task è schedulato in un giorno
         task_day_vars = {}
@@ -213,44 +225,36 @@ class SchedulingModel:
 
                 if day_vars:
                     var_name = f"day_{task_id}_{d.strftime('%Y%m%d')}"
-                    task_day_vars[task_id, d] = self.model.addVar(
-                        vtype="B", name=var_name
-                    )
+                    task_day_vars[task_id, d] = self.model.NewBoolVar(var_name)
 
-                    # Constraint: day_var = 1 se almeno un'ora del giorno è pianificata
-                    self.model.addCons(
-                        quicksum(day_vars) <= 24 * task_day_vars[task_id, d],
-                        name=f"link_day_{task_id}_{d.strftime('%Y%m%d')}"
-                    )
-
-                    self.model.addCons(
-                        quicksum(day_vars) >= task_day_vars[task_id, d],
-                        name=f"link_day_min_{task_id}_{d.strftime('%Y%m%d')}"
-                    )
+                    # Constraint: day_var = True se almeno un'ora del giorno è pianificata
+                    self.model.Add(sum(day_vars) <= 24 * task_day_vars[task_id, d])
+                    self.model.Add(sum(day_vars) >= task_day_vars[task_id, d])
 
         # Obiettivo: minimizzare il numero di giorni utilizzati per ogni task
-        all_day_vars = [var for var in task_day_vars.values()]
-        self.model.setObjective(quicksum(all_day_vars), "minimize")
+        all_day_vars = list(task_day_vars.values())
+        if all_day_vars:
+            self.model.Minimize(sum(all_day_vars))
 
     def solve(self):
         """Risolve il modello di ottimizzazione"""
-        logger.info("Avvio della risoluzione del modello")
+        logger.info("Avvio della risoluzione del modello OrTools")
 
         if not self.model:
             self.build_model()
 
         # Risolve il modello
-        self.model.optimize()
+        status = self.solver.Solve(self.model)
 
         # Controlla lo stato della soluzione
-        status = self.model.getStatus()
-        logger.info(f"Stato della soluzione: {status}")
+        status_name = self.solver.StatusName(status)
+        logger.info(f"Stato della soluzione: {status_name}")
 
-        if status == "optimal" or status == "feasible":
+        if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
             self._extract_solution()
             return True
         else:
-            logger.warning(f"Nessuna soluzione trovata. Stato: {status}")
+            logger.warning(f"Nessuna soluzione trovata. Stato: {status_name}")
             return False
 
     def _extract_solution(self):
@@ -260,14 +264,14 @@ class SchedulingModel:
         # Prepara il dizionario della soluzione
         solution = {
             'tasks': {},
-            'objective_value': self.model.getObjVal(),
-            'status': self.model.getStatus(),
-            'solve_time': self.model.getSolvingTime()
+            'objective_value': self.solver.ObjectiveValue(),
+            'status': self.solver.StatusName(),
+            'solve_time': self.solver.WallTime()
         }
 
         # Estrai l'assegnazione delle ore per ogni attività
         for key, var in self.vars['x'].items():
-            if self.model.getVal(var) > 0.5:  # Variabile binaria attiva
+            if self.solver.Value(var):  # Variabile booleana attiva
                 task_id, date, hour = key
 
                 if task_id not in solution['tasks']:
@@ -296,12 +300,21 @@ class SchedulingModel:
         # Prepara i dati per il DataFrame
         rows = []
         for task_id, slots in self.solution['tasks'].items():
-            task_name = self.tasks_df[self.tasks_df['id'] == task_id]['name'].iloc[0]
-            user_id = self.tasks_df[self.tasks_df['id'] == task_id]['user_id'].iloc[0]
+            # Converti task_id a int se è una stringa
+            task_id_int = int(task_id) if isinstance(task_id, str) else task_id
+
+            # Trova le informazioni del task
+            task_info = self.tasks_df[self.tasks_df['id'] == task_id_int]
+            if task_info.empty:
+                logger.warning(f"Task {task_id_int} non trovato nel DataFrame dei task")
+                continue
+
+            task_name = task_info['name'].iloc[0]
+            user_id = task_info['user_id'].iloc[0]
 
             for slot in slots:
                 rows.append({
-                    'task_id': task_id,
+                    'task_id': task_id_int,
                     'task_name': task_name,
                     'user_id': user_id,
                     'date': slot['date'],
@@ -315,4 +328,25 @@ class SchedulingModel:
             df = df.sort_values(['date', 'hour', 'task_id'])
             return df
         else:
-            return pd.DataFrame()
+            return pd.DataFrame(columns=['task_id', 'task_name', 'user_id', 'date', 'hour'])
+
+    def get_solver_statistics(self):
+        """
+        Restituisce le statistiche del solver per analisi delle performance.
+
+        Returns:
+            dict: Dizionario con le statistiche del solver
+        """
+        if not self.solver:
+            return {}
+
+        return {
+            'status': self.solver.StatusName(),
+            'objective_value': self.solver.ObjectiveValue() if self.solver.StatusName() in ['OPTIMAL', 'FEASIBLE'] else None,
+            'wall_time': self.solver.WallTime(),
+            'user_time': self.solver.UserTime(),
+            'num_branches': self.solver.NumBranches(),
+            'num_conflicts': self.solver.NumConflicts(),
+            'num_booleans': self.solver.NumBooleans(),
+            'num_constraints': self.solver.NumConstraints()
+        }

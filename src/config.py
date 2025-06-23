@@ -26,12 +26,12 @@ SSH_PARAMS = {
     "remote_bind_port": int(os.getenv("REMOTE_BIND_PORT", "5432")),
 }
 
-# Parametri SCIP
-SCIP_PARAMS = {
-    "time_limit": int(os.getenv("SCIP_TIME_LIMIT", "3600")),  # secondi
-    "gap_limit": float(os.getenv("SCIP_GAP_LIMIT", "0.01")),  # 1%
-    "threads": int(os.getenv("SCIP_THREADS", "4")),
-    "output_file": os.getenv("SCIP_OUTPUT_FILE", "/app/data/schedule.json"),
+# Parametri OrTools
+ORTOOLS_PARAMS = {
+    "time_limit": int(os.getenv("ORTOOLS_TIME_LIMIT", "3600")),  # secondi
+    "num_search_workers": int(os.getenv("ORTOOLS_WORKERS", "4")),
+    "log_search_progress": os.getenv("ORTOOLS_LOG_PROGRESS", "false").lower() == "true",
+    "output_file": os.getenv("ORTOOLS_OUTPUT_FILE", "/app/data/schedule.json"),
 }
 
 # Configurazione task

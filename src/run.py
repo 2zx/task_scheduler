@@ -5,7 +5,7 @@ import signal
 import cmd
 import logging
 
-from .config import setup_logging, SCIP_PARAMS
+from .config import setup_logging, ORTOOLS_PARAMS
 from .fetch import get_tasks, get_calendar_slots, get_leaves
 from .db import get_db_connection, close_connection
 from .scheduler.model import SchedulingModel
@@ -62,7 +62,7 @@ class SchedulerShell(cmd.Cmd):
                 return
 
             # Controlla se esiste un file di output
-            output_exists = os.path.exists(SCIP_PARAMS['output_file'])
+            output_exists = os.path.exists(ORTOOLS_PARAMS['output_file'])
 
             # Ottieni statistiche sui task pendenti
             pending_count = len(get_tasks())
@@ -74,7 +74,7 @@ class SchedulerShell(cmd.Cmd):
 
             # Se esiste un file di output, mostra quando è stato generato
             if output_exists:
-                mod_time = os.path.getmtime(SCIP_PARAMS['output_file'])
+                mod_time = os.path.getmtime(ORTOOLS_PARAMS['output_file'])
                 mod_time_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(mod_time))
                 print(f"Ultima pianificazione: {mod_time_str}")
 
@@ -163,15 +163,39 @@ def run_scheduler(task_ids=None):
 
             # Salva la soluzione in formato JSON
             solution = model.solution
-            os.makedirs(os.path.dirname(SCIP_PARAMS['output_file']), exist_ok=True)
-            with open(SCIP_PARAMS['output_file'], 'w') as f:
+            os.makedirs(os.path.dirname(ORTOOLS_PARAMS['output_file']), exist_ok=True)
+            with open(ORTOOLS_PARAMS['output_file'], 'w') as f:
                 json.dump(solution, f, indent=2, default=str)
-            logger.info(f"Soluzione salvata in {SCIP_PARAMS['output_file']}")
+            logger.info(f"Soluzione salvata in {ORTOOLS_PARAMS['output_file']}")
+
+            # Genera visualizzazioni grafiche
+            try:
+                from src.scheduler.visualization import ScheduleVisualizer
+                visualizer = ScheduleVisualizer(solution_df, tasks_df)
+                charts = visualizer.generate_all_charts()
+
+                if charts:
+                    print(f"\n📊 Grafici generati:")
+                    for chart_type, path in charts.items():
+                        if path:
+                            print(f"  • {chart_type}: {path}")
+
+                    # Crea report HTML
+                    report_path = visualizer.create_summary_report(charts)
+                    print(f"\n📋 Report completo: {report_path}")
+
+            except ImportError:
+                logger.warning("Modulo di visualizzazione non disponibile")
+            except Exception as e:
+                logger.error(f"Errore nella generazione dei grafici: {str(e)}")
 
             # Stampa un riassunto della pianificazione in formato dettagliato
-            from src.scheduler.utils import format_schedule_output
-            formatted_output = format_schedule_output(solution_df, tasks_df)
-            print(formatted_output)
+            try:
+                from src.scheduler.utils import format_schedule_output
+                formatted_output = format_schedule_output(solution_df, tasks_df)
+                print(formatted_output)
+            except ImportError:
+                logger.warning("Modulo utils non disponibile per il formato output")
 
             # Stampa un riassunto numerico
             print("\nRIEPILOGO NUMERICO:")

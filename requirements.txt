@@ -5,3 +5,7 @@ sshtunnel
 python-dotenv
 pytest
 pytest-cov
+ortools>=9.8.3296
+matplotlib>=3.7.0
+seaborn>=0.12.0
+plotly>=5.15.0
