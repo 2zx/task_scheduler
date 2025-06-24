@@ -29,7 +29,9 @@ env/
 # Log e output
 logs/
 *.log
-data/*.json
+# Ignore all files in data directory but preserve the directory structure
+data/*
+!data/.gitkeep
 
 # File di configurazione locali
 .env
@@ -39,6 +41,7 @@ data/*.json
 .coverage
 htmlcov/
 .tox/
+_tmp/
 
 # IDE e editor
 .idea/

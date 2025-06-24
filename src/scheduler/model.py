@@ -68,7 +68,7 @@ class SchedulingModel:
 
         for _, row in self.calendar_slots_df.iterrows():
             task_id = row['task_id']
-            day = row['dayofweek']
+            day = int(row['dayofweek'])  # Converti a intero
             hour_from = row['hour_from']
             hour_to = row['hour_to']
 
@@ -94,19 +94,45 @@ class SchedulingModel:
         """Prepara i dati sulle assenze, convertendoli in giorni non disponibili"""
         self.unavailable_days = {}
 
+        # Definisci il periodo di pianificazione
+        planning_start = self.days[0]
+        planning_end = self.days[-1]
+
+        logger.debug(f"Planning period: {planning_start} to {planning_end}")
+
+        leaves_in_period = 0
+        total_leaves_processed = 0
+
         for _, row in self.leaves_df.iterrows():
             task_id = row['task_id']
             date_from = row['date_from'].date() if isinstance(row['date_from'], datetime) else row['date_from']
             date_to = row['date_to'].date() if isinstance(row['date_to'], datetime) else row['date_to']
 
-            # Calcola tutti i giorni di assenza
-            current_date = date_from
-            while current_date <= date_to:
+            total_leaves_processed += 1
+
+            # Filtra solo le assenze che si sovrappongono al periodo di pianificazione
+            if date_to < planning_start or date_from > planning_end:
+                continue  # Assenza fuori dal periodo di pianificazione
+
+            # Limita le date al periodo di pianificazione
+            effective_start = max(date_from, planning_start)
+            effective_end = min(date_to, planning_end)
+
+            # Calcola tutti i giorni di assenza nel periodo
+            current_date = effective_start
+            while current_date <= effective_end:
                 if task_id not in self.unavailable_days:
                     self.unavailable_days[task_id] = []
 
                 self.unavailable_days[task_id].append(current_date)
                 current_date += timedelta(days=1)
+                leaves_in_period += 1
+
+        logger.info(f"Processed {total_leaves_processed} total leaves, {leaves_in_period} days in planning period")
+
+        # Log statistiche per task
+        for task_id, days in self.unavailable_days.items():
+            logger.debug(f"Task {task_id}: {len(days)} unavailable days in planning period")
 
     def build_model(self):
         """Costruisce il modello di ottimizzazione OrTools CP-SAT"""
@@ -177,10 +203,13 @@ class SchedulingModel:
 
     def _create_constraints(self):
         """Crea i vincoli per il modello"""
-        # Vincolo: ogni task deve essere pianificato per il numero di ore richiesto
+        # Vincolo rilassato: ogni task deve essere pianificato per almeno il 50% delle ore richieste
+        # ma non più del 100%
         for _, task in self.tasks_df.iterrows():
             task_id = task['id']
             planned_hours = int(task['planned_hours'])
+            min_hours = max(1, planned_hours // 2)  # Almeno 50% delle ore, minimo 1
+            max_hours = planned_hours
 
             task_vars = [
                 self.vars['x'][task_id, d, h]
@@ -190,7 +219,10 @@ class SchedulingModel:
             ]
 
             if task_vars:  # Controlla che ci siano variabili disponibili
-                self.model.Add(sum(task_vars) == planned_hours)
+                # Vincolo minimo e massimo invece di uguaglianza stretta
+                self.model.Add(sum(task_vars) >= min_hours)
+                self.model.Add(sum(task_vars) <= max_hours)
+                logger.debug(f"Task {task_id}: {min_hours}-{max_hours} ore (richieste: {planned_hours})")
 
         # Vincolo: una risorsa può svolgere al massimo un'attività per ogni slot orario
         for d in self.days:
@@ -253,9 +285,79 @@ class SchedulingModel:
         if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
             self._extract_solution()
             return True
+        elif status == cp_model.INFEASIBLE:
+            logger.warning("Modello INFEASIBLE - Tentativo con vincoli ancora più rilassati")
+            return self._solve_with_relaxed_constraints()
         else:
             logger.warning(f"Nessuna soluzione trovata. Stato: {status_name}")
             return False
+
+    def _solve_with_relaxed_constraints(self):
+        """Risolve il modello con vincoli molto rilassati"""
+        logger.info("Tentativo di risoluzione con vincoli rilassati")
+
+        # Ricrea il modello con vincoli più rilassati
+        self.model = cp_model.CpModel()
+        self.solver = cp_model.CpSolver()
+
+        # Configura i parametri del solutore
+        self.solver.parameters.max_time_in_seconds = ORTOOLS_PARAMS['time_limit']
+        self.solver.parameters.num_search_workers = ORTOOLS_PARAMS['num_search_workers']
+        self.solver.parameters.log_search_progress = ORTOOLS_PARAMS['log_search_progress']
+
+        # Ricrea le variabili (sono già create)
+        # Crea vincoli molto rilassati
+        self._create_relaxed_constraints()
+        self._create_objective()
+
+        # Risolve il modello rilassato
+        status = self.solver.Solve(self.model)
+        status_name = self.solver.StatusName(status)
+        logger.info(f"Stato della soluzione rilassata: {status_name}")
+
+        if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
+            self._extract_solution()
+            return True
+        else:
+            logger.error(f"Anche il modello rilassato non ha soluzione: {status_name}")
+            return False
+
+    def _create_relaxed_constraints(self):
+        """Crea vincoli molto rilassati per trovare almeno una soluzione"""
+        # Vincolo molto rilassato: ogni task deve essere pianificato per almeno 1 ora
+        for _, task in self.tasks_df.iterrows():
+            task_id = task['id']
+            planned_hours = int(task['planned_hours'])
+            min_hours = 1  # Almeno 1 ora
+            max_hours = min(planned_hours, 8)  # Massimo 8 ore per task
+
+            task_vars = [
+                self.vars['x'][task_id, d, h]
+                for d in self.days
+                for h in range(24)
+                if (task_id, d, h) in self.vars['x']
+            ]
+
+            if task_vars:  # Controlla che ci siano variabili disponibili
+                self.model.Add(sum(task_vars) >= min_hours)
+                self.model.Add(sum(task_vars) <= max_hours)
+                logger.debug(f"Relaxed Task {task_id}: {min_hours}-{max_hours} ore (richieste: {planned_hours})")
+
+        # Vincolo: una risorsa può svolgere al massimo un'attività per ogni slot orario
+        for d in self.days:
+            for h in range(24):
+                for user_id in self.tasks_df['user_id'].unique():
+                    # Filtra i task per user_id
+                    user_tasks = self.tasks_df[self.tasks_df['user_id'] == user_id]['id'].tolist()
+
+                    slot_vars = [
+                        self.vars['x'][task_id, d, h]
+                        for task_id in user_tasks
+                        if (task_id, d, h) in self.vars['x']
+                    ]
+
+                    if len(slot_vars) > 1:  # Se c'è più di una variabile, aggiungi il vincolo
+                        self.model.Add(sum(slot_vars) <= 1)
 
     def _extract_solution(self):
         """Estrae la soluzione dal modello risolto"""

@@ -24,13 +24,20 @@ def get_sqlalchemy_engine():
     # Se esiste già un engine valido, lo restituisce
     if _engine is not None:
         try:
-            # Testa la connessione
+            # Testa la connessione usando pool_pre_ping (più affidabile)
             with _engine.connect() as conn:
-                conn.execute("SELECT 1")
+                # Usa il metodo più compatibile per testare la connessione
+                result = conn.execute("SELECT 1")
+                result.close()  # Chiudi esplicitamente il result
             logger.debug("Riutilizzo engine SQLAlchemy esistente")
             return _engine
         except Exception as e:
             logger.warning(f"Engine SQLAlchemy esistente non più valido: {str(e)}")
+            # Disponi l'engine prima di ricrearlo
+            try:
+                _engine.dispose()
+            except Exception:
+                pass
             _engine = None
 
     # Se non esiste un engine valido, ne crea uno nuovo
@@ -63,8 +70,13 @@ def get_sqlalchemy_engine():
                 f"@{DB_PARAMS['host']}:{DB_PARAMS['port']}/{DB_PARAMS['database']}"
             )
 
-        # Crea l'engine SQLAlchemy
-        _engine = create_engine(connection_string, pool_pre_ping=True)
+        # Crea l'engine SQLAlchemy con configurazioni ottimizzate
+        _engine = create_engine(
+            connection_string,
+            pool_pre_ping=True,
+            pool_recycle=3600,  # Ricrea le connessioni ogni ora
+            echo=False  # Disabilita il logging SQL dettagliato
+        )
         logger.info("Engine SQLAlchemy creato con successo")
 
         return _engine
