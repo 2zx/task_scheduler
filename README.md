@@ -167,10 +167,29 @@ day[task_id, date] = True      # Se task usa quel giorno
 
 ### Vincoli Principali
 
-1. **Ore Pianificate**: Ogni task deve essere completato per le ore richieste
+1. **Ore Pianificate**: Ogni task deve essere completato esattamente per le ore richieste
 2. **Disponibilità Risorse**: Una risorsa può fare solo un task per slot
 3. **Calendari di Lavoro**: Rispetto degli orari di lavoro
 4. **Gestione Assenze**: Esclusione giorni di ferie/malattia
+
+### Estensione Automatica dell'Orizzonte Temporale
+
+Il sistema garantisce sempre una soluzione fattibile attraverso:
+- Orizzonte temporale iniziale di 28 giorni (4 settimane)
+- Estensione automatica dell'orizzonte se non viene trovata una soluzione
+- Mantenimento rigoroso dei vincoli (nessun rilassamento)
+- Fattore di estensione configurabile (default: raddoppio dell'orizzonte)
+
+```python
+# Esempio di configurazione
+model = SchedulingModel(
+    tasks_df,
+    calendar_slots_df,
+    leaves_df,
+    initial_horizon_days=28,     # Orizzonte iniziale
+    horizon_extension_factor=2   # Fattore di estensione
+)
+```
 
 ### Funzione Obiettivo
 
@@ -247,6 +266,21 @@ ORTOOLS_LOG_PROGRESS=true
 
 # File di output
 ORTOOLS_OUTPUT_FILE=/app/data/schedule.json
+```
+
+### Parametri di Estensione dell'Orizzonte
+
+Questi parametri possono essere configurati nel codice:
+
+```python
+# In src/run.py
+model = SchedulingModel(
+    tasks_df,
+    calendar_slots_df,
+    leaves_df,
+    initial_horizon_days=28,     # Orizzonte iniziale in giorni
+    horizon_extension_factor=2   # Fattore di moltiplicazione per ogni estensione
+)
 ```
 
 ### Tunnel SSH per Database Remoti
@@ -352,9 +386,12 @@ Il sistema fornisce metriche dettagliate:
   },
   "objective_value": 15,
   "status": "OPTIMAL",
-  "solve_time": 2.34
+  "solve_time": 2.34,
+  "horizon_days": 56
 }
 ```
+
+Il campo `horizon_days` indica l'orizzonte temporale finale utilizzato per trovare la soluzione. Se questo valore è maggiore dell'orizzonte iniziale (28 giorni), significa che il sistema ha dovuto estendere l'orizzonte per trovare una soluzione fattibile.
 
 ## 🧪 Testing
 
@@ -379,10 +416,12 @@ docker-compose exec task-scheduler pytest tests/test_schedule_model.py
    docker-compose exec task-scheduler python -c "from src.db import get_db_connection; print(get_db_connection())"
    ```
 
-2. **Nessuna Soluzione Trovata**
-   - Verifica vincoli troppo restrittivi
-   - Controlla disponibilità calendari
-   - Aumenta ORTOOLS_TIME_LIMIT
+2. **Soluzioni con Orizzonte Esteso**
+   - Il sistema estenderà automaticamente l'orizzonte temporale fino a trovare una soluzione
+   - Se l'orizzonte diventa molto ampio, verifica:
+     - Disponibilità calendari (giorni/ore lavorative sufficienti)
+     - Assenze eccessive che limitano gli slot disponibili
+   - Aumenta ORTOOLS_TIME_LIMIT per orizzonti molto estesi
 
 3. **Performance Lente**
    - Riduci TASK_LIMIT

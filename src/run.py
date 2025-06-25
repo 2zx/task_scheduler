@@ -153,7 +153,8 @@ def run_scheduler(task_ids=None):
         logger.info(f"Recuperate {len(leaves_df)} assenze")
 
         # Crea e risolvi il modello di ottimizzazione
-        model = SchedulingModel(tasks_df, calendar_slots_df, leaves_df)
+        # Inizializza con un orizzonte di 28 giorni (4 settimane) e un fattore di estensione di 1.25 (25%)
+        model = SchedulingModel(tasks_df, calendar_slots_df, leaves_df, initial_horizon_days=28, horizon_extension_factor=1.25)
         success = model.solve()
 
         if success:
@@ -175,7 +176,7 @@ def run_scheduler(task_ids=None):
                 charts = visualizer.generate_all_charts()
 
                 if charts:
-                    print(f"\n📊 Grafici generati:")
+                    print("\n📊 Grafici generati:")
                     for chart_type, path in charts.items():
                         if path:
                             print(f"  • {chart_type}: {path}")
@@ -199,6 +200,13 @@ def run_scheduler(task_ids=None):
 
             # Stampa un riassunto numerico
             print("\nRIEPILOGO NUMERICO:")
+            # Mostra l'orizzonte temporale utilizzato
+            if 'horizon_days' in solution:
+                print(f"Orizzonte temporale utilizzato: {solution['horizon_days']} giorni")
+                if solution['horizon_days'] > 28:  # Se è stato esteso oltre il valore predefinito
+                    print("Nota: L'orizzonte temporale è stato esteso per trovare una soluzione fattibile.")
+                print()
+
             for task_id, task_data in solution['tasks'].items():
                 task_name = tasks_df[tasks_df['id'] == task_id]['name'].iloc[0]
                 print(f"Attività: {task_name} (ID: {task_id})")

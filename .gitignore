@@ -50,3 +50,4 @@ _tmp/
 *.swo
 *~
 *.code-workspace
+.DS_Store

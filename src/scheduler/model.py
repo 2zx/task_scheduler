@@ -14,7 +14,7 @@ class SchedulingModel:
     utilizzando Google OrTools CP-SAT come solutore.
     """
 
-    def __init__(self, tasks_df, calendar_slots_df, leaves_df):
+    def __init__(self, tasks_df, calendar_slots_df, leaves_df, initial_horizon_days=28, horizon_extension_factor=1.25):
         """
         Inizializza il modello con i dati necessari.
 
@@ -22,10 +22,15 @@ class SchedulingModel:
             tasks_df: DataFrame con le attività da pianificare
             calendar_slots_df: DataFrame con gli slot disponibili nel calendario
             leaves_df: DataFrame con le assenze pianificate
+            initial_horizon_days: Numero di giorni dell'orizzonte temporale iniziale
+            horizon_extension_factor: Fattore di estensione dell'orizzonte temporale
         """
         self.tasks_df = tasks_df
         self.calendar_slots_df = calendar_slots_df
         self.leaves_df = leaves_df
+        self.initial_horizon_days = initial_horizon_days
+        self.horizon_extension_factor = horizon_extension_factor
+        self.current_horizon_days = initial_horizon_days
         self.model = None
         self.solver = None
         self.vars = {}
@@ -36,11 +41,11 @@ class SchedulingModel:
 
     def _prepare_data(self):
         """Prepara e trasforma i dati per il modello di ottimizzazione"""
-        logger.info("Preparazione dei dati per il modello di ottimizzazione")
+        logger.info(f"Preparazione dei dati per il modello di ottimizzazione con orizzonte di {self.current_horizon_days} giorni")
 
-        # Genera un orizzonte temporale di pianificazione (es. 4 settimane)
+        # Genera un orizzonte temporale di pianificazione basato sul parametro corrente
         today = datetime.now().date()
-        self.days = [today + timedelta(days=i) for i in range(28)]  # 4 settimane
+        self.days = [today + timedelta(days=i) for i in range(self.current_horizon_days)]
 
         # Mappa i giorni della settimana (0-6) alle date effettive
         self.day_to_date = {d.weekday(): d for d in self.days}
@@ -52,6 +57,30 @@ class SchedulingModel:
         self._prepare_leaves()
 
         logger.info("Preparazione dei dati completata")
+
+    def _extend_planning_horizon(self):
+        """Estende l'orizzonte temporale e rigenera il modello"""
+        # Calcola il nuovo orizzonte (aumento del 25% di default)
+        new_horizon = int(self.current_horizon_days * self.horizon_extension_factor)
+        # Assicurati che ci sia almeno un incremento di 7 giorni
+        if new_horizon - self.current_horizon_days < 7:
+            new_horizon = self.current_horizon_days + 7
+
+        logger.info(f"Estensione dell'orizzonte temporale da {self.current_horizon_days} a {new_horizon} giorni")
+
+        # Estendi l'orizzonte
+        self.current_horizon_days = new_horizon
+
+        # Rigenera i dati con il nuovo orizzonte
+        self._prepare_data()
+
+        # Ricrea il modello
+        self.model = None
+        self.solver = None
+        self.vars = {}
+        self.build_model()
+
+        return self.current_horizon_days
 
     def _prepare_available_slots(self):
         """Prepara gli slot disponibili per ogni task basandosi sul calendario"""
@@ -143,7 +172,8 @@ class SchedulingModel:
         self.solver = cp_model.CpSolver()
 
         # Configura i parametri del solutore
-        self.solver.parameters.max_time_in_seconds = ORTOOLS_PARAMS['time_limit']
+        # Limita il tempo di risoluzione per evitare blocchi
+        self.solver.parameters.max_time_in_seconds = min(ORTOOLS_PARAMS['time_limit'], 300)  # Max 5 minuti per iterazione
         self.solver.parameters.num_search_workers = ORTOOLS_PARAMS['num_search_workers']
         self.solver.parameters.log_search_progress = ORTOOLS_PARAMS['log_search_progress']
 
@@ -203,13 +233,10 @@ class SchedulingModel:
 
     def _create_constraints(self):
         """Crea i vincoli per il modello"""
-        # Vincolo rilassato: ogni task deve essere pianificato per almeno il 50% delle ore richieste
-        # ma non più del 100%
+        # Vincolo rigoroso: ogni task deve essere pianificato esattamente per le ore richieste
         for _, task in self.tasks_df.iterrows():
             task_id = task['id']
             planned_hours = int(task['planned_hours'])
-            min_hours = max(1, planned_hours // 2)  # Almeno 50% delle ore, minimo 1
-            max_hours = planned_hours
 
             task_vars = [
                 self.vars['x'][task_id, d, h]
@@ -219,10 +246,9 @@ class SchedulingModel:
             ]
 
             if task_vars:  # Controlla che ci siano variabili disponibili
-                # Vincolo minimo e massimo invece di uguaglianza stretta
-                self.model.Add(sum(task_vars) >= min_hours)
-                self.model.Add(sum(task_vars) <= max_hours)
-                logger.debug(f"Task {task_id}: {min_hours}-{max_hours} ore (richieste: {planned_hours})")
+                # Vincolo di uguaglianza stretta
+                self.model.Add(sum(task_vars) == planned_hours)
+                logger.debug(f"Task {task_id}: esattamente {planned_hours} ore")
 
         # Vincolo: una risorsa può svolgere al massimo un'attività per ogni slot orario
         for d in self.days:
@@ -268,96 +294,87 @@ class SchedulingModel:
         if all_day_vars:
             self.model.Minimize(sum(all_day_vars))
 
-    def solve(self):
-        """Risolve il modello di ottimizzazione"""
+    def solve(self, max_horizon_days=365 * 5):  # 5 anni come limite massimo
+        """
+        Risolve il modello di ottimizzazione estendendo l'orizzonte se necessario.
+
+        Args:
+            max_horizon_days: Numero massimo di giorni dell'orizzonte temporale
+
+        Returns:
+            bool: True se è stata trovata una soluzione, False altrimenti
+        """
         logger.info("Avvio della risoluzione del modello OrTools")
 
         if not self.model:
             self.build_model()
 
-        # Risolve il modello
-        status = self.solver.Solve(self.model)
+        # Configura un callback per il logging del progresso
+        class SolutionCallback(cp_model.CpSolverSolutionCallback):
+            def __init__(self, variables):
+                cp_model.CpSolverSolutionCallback.__init__(self)
+                self.__variables = variables
+                self.__solution_count = 0
+                self.__start_time = time.time()
+                self.__last_log_time = self.__start_time
+                self.__log_interval = 2  # Log ogni 2 secondi
+                self.__progress_log_interval = 10  # Log di progresso ogni 10 secondi
+                self.__last_progress_log_time = self.__start_time
 
-        # Controlla lo stato della soluzione
-        status_name = self.solver.StatusName(status)
-        logger.info(f"Stato della soluzione: {status_name}")
+            def on_solution_callback(self):
+                self.__solution_count += 1
+                current_time = time.time()
+                elapsed = current_time - self.__start_time
 
-        if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
-            self._extract_solution()
-            return True
-        elif status == cp_model.INFEASIBLE:
-            logger.warning("Modello INFEASIBLE - Tentativo con vincoli ancora più rilassati")
-            return self._solve_with_relaxed_constraints()
-        else:
-            logger.warning(f"Nessuna soluzione trovata. Stato: {status_name}")
-            return False
+                # Log solo ogni X secondi per non intasare il log
+                if current_time - self.__last_log_time >= self.__log_interval:
+                    logger.info(f"Soluzione intermedia #{self.__solution_count} trovata dopo {elapsed:.2f} secondi")
+                    self.__last_log_time = current_time
 
-    def _solve_with_relaxed_constraints(self):
-        """Risolve il modello con vincoli molto rilassati"""
-        logger.info("Tentativo di risoluzione con vincoli rilassati")
+            def __call__(self):
+                # Chiamato periodicamente durante la ricerca
+                current_time = time.time()
+                elapsed = current_time - self.__start_time
 
-        # Ricrea il modello con vincoli più rilassati
-        self.model = cp_model.CpModel()
-        self.solver = cp_model.CpSolver()
+                # Log di progresso periodico anche se non vengono trovate soluzioni
+                if current_time - self.__last_progress_log_time >= self.__progress_log_interval:
+                    logger.info(f"Ricerca in corso... {elapsed:.2f} secondi trascorsi, "
+                                f"{self.__solution_count} soluzioni trovate finora")
+                    self.__last_progress_log_time = current_time
 
-        # Configura i parametri del solutore
-        self.solver.parameters.max_time_in_seconds = ORTOOLS_PARAMS['time_limit']
-        self.solver.parameters.num_search_workers = ORTOOLS_PARAMS['num_search_workers']
-        self.solver.parameters.log_search_progress = ORTOOLS_PARAMS['log_search_progress']
+                # Chiamata al metodo della classe base
+                super().__call__()
 
-        # Ricrea le variabili (sono già create)
-        # Crea vincoli molto rilassati
-        self._create_relaxed_constraints()
-        self._create_objective()
+        import time  # Importa il modulo time per il callback
 
-        # Risolve il modello rilassato
-        status = self.solver.Solve(self.model)
-        status_name = self.solver.StatusName(status)
-        logger.info(f"Stato della soluzione rilassata: {status_name}")
+        while self.current_horizon_days <= max_horizon_days:
+            # Configura il solver con un callback
+            self.solver.parameters.log_search_progress = True
 
-        if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
-            self._extract_solution()
-            return True
-        else:
-            logger.error(f"Anche il modello rilassato non ha soluzione: {status_name}")
-            return False
+            # Log prima di iniziare la risoluzione
+            num_vars = len(self.vars['x'])
+            logger.info(f"Inizio risoluzione con orizzonte di {self.current_horizon_days} giorni e {num_vars} variabili")
+            logger.info(f"Parametri solver: time_limit={self.solver.parameters.max_time_in_seconds}s, "
+                        f"workers={self.solver.parameters.num_search_workers}")
 
-    def _create_relaxed_constraints(self):
-        """Crea vincoli molto rilassati per trovare almeno una soluzione"""
-        # Vincolo molto rilassato: ogni task deve essere pianificato per almeno 1 ora
-        for _, task in self.tasks_df.iterrows():
-            task_id = task['id']
-            planned_hours = int(task['planned_hours'])
-            min_hours = 1  # Almeno 1 ora
-            max_hours = min(planned_hours, 8)  # Massimo 8 ore per task
+            # Risolve il modello con l'orizzonte attuale
+            solution_callback = SolutionCallback(self.vars['x'])
+            status = self.solver.Solve(self.model, solution_callback)
+            status_name = self.solver.StatusName(status)
+            logger.info(f"Stato della soluzione con orizzonte di {self.current_horizon_days} giorni: {status_name}")
 
-            task_vars = [
-                self.vars['x'][task_id, d, h]
-                for d in self.days
-                for h in range(24)
-                if (task_id, d, h) in self.vars['x']
-            ]
+            if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
+                self._extract_solution()
+                return True
+            elif status == cp_model.INFEASIBLE:
+                logger.warning(f"Modello INFEASIBLE con orizzonte di {self.current_horizon_days} giorni - Estendo orizzonte")
+                self._extend_planning_horizon()
+            else:
+                logger.warning(f"Stato non gestito: {status_name}. Estensione dell'orizzonte")
+                self._extend_planning_horizon()
 
-            if task_vars:  # Controlla che ci siano variabili disponibili
-                self.model.Add(sum(task_vars) >= min_hours)
-                self.model.Add(sum(task_vars) <= max_hours)
-                logger.debug(f"Relaxed Task {task_id}: {min_hours}-{max_hours} ore (richieste: {planned_hours})")
-
-        # Vincolo: una risorsa può svolgere al massimo un'attività per ogni slot orario
-        for d in self.days:
-            for h in range(24):
-                for user_id in self.tasks_df['user_id'].unique():
-                    # Filtra i task per user_id
-                    user_tasks = self.tasks_df[self.tasks_df['user_id'] == user_id]['id'].tolist()
-
-                    slot_vars = [
-                        self.vars['x'][task_id, d, h]
-                        for task_id in user_tasks
-                        if (task_id, d, h) in self.vars['x']
-                    ]
-
-                    if len(slot_vars) > 1:  # Se c'è più di una variabile, aggiungi il vincolo
-                        self.model.Add(sum(slot_vars) <= 1)
+        logger.error(f"Nessuna soluzione trovata anche con orizzonte massimo di {max_horizon_days} giorni")
+        return False
 
     def _extract_solution(self):
         """Estrae la soluzione dal modello risolto"""
@@ -368,7 +385,8 @@ class SchedulingModel:
             'tasks': {},
             'objective_value': self.solver.ObjectiveValue(),
             'status': self.solver.StatusName(),
-            'solve_time': self.solver.WallTime()
+            'solve_time': self.solver.WallTime(),
+            'horizon_days': self.current_horizon_days
         }
 
         # Estrai l'assegnazione delle ore per ogni attività
@@ -385,7 +403,7 @@ class SchedulingModel:
                 })
 
         self.solution = solution
-        logger.info("Soluzione estratta con successo")
+        logger.info(f"Soluzione estratta con successo (orizzonte: {self.current_horizon_days} giorni)")
         return solution
 
     def get_solution_dataframe(self):
@@ -442,7 +460,7 @@ class SchedulingModel:
         if not self.solver:
             return {}
 
-        return {
+        stats = {
             'status': self.solver.StatusName(),
             'objective_value': self.solver.ObjectiveValue() if self.solver.StatusName() in ['OPTIMAL', 'FEASIBLE'] else None,
             'wall_time': self.solver.WallTime(),
@@ -452,3 +470,10 @@ class SchedulingModel:
             'num_booleans': self.solver.NumBooleans(),
             'num_constraints': self.solver.NumConstraints()
         }
+
+        # Aggiungi informazioni sull'orizzonte temporale
+        if hasattr(self, 'current_horizon_days'):
+            stats['horizon_days'] = self.current_horizon_days
+            stats['initial_horizon_days'] = self.initial_horizon_days
+
+        return stats
