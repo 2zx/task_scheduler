@@ -19,6 +19,26 @@ services:
     networks:
       - scip-network
 
+  task-scheduler-api:
+    build: .
+    container_name: task-scheduler-api
+    command: python -m src.run_api --host 0.0.0.0 --port 5000
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./src:/app/src
+      - ./logs:/app/logs
+      - ./data:/app/data
+      - ~/.ssh/id_rsa:/app/ssh_key:ro
+    env_file:
+      - .env
+    environment:
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=INFO
+    restart: unless-stopped
+    networks:
+      - scip-network
+
 networks:
   scip-network:
     driver: bridge

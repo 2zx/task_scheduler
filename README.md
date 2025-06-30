@@ -6,6 +6,7 @@ Un sistema di pianificazione delle attività ottimizzato, progettato per l'alloc
 
 - **Pianificazione automatica** delle attività basata su vincoli complessi
 - **Integrazione nativa con Odoo 10** per gestione lavanderie industriali
+- **API REST** per invocazione da sistemi esterni (incluso Odoo 12)
 - **Solver OrTools CP-SAT** per ottimizzazione ad alte prestazioni
 - **Supporto PostgreSQL** con connessioni sicure
 - **Tunnel SSH** per connessioni a database remoti
@@ -437,6 +438,52 @@ docker-compose logs -f task-scheduler
 # Log con livello debug
 docker-compose exec task-scheduler LOG_LEVEL=DEBUG python -m src.run
 ```
+
+## 🌐 API REST
+
+Il Task Scheduler espone un'API REST che consente di invocare lo scheduler da sistemi esterni, come un'istanza Odoo 12, e ottenere i risultati della pianificazione in formato JSON.
+
+### Avvio del Server API
+
+```bash
+# Avvia il servizio API con Docker Compose
+docker-compose up -d task-scheduler-api
+
+# Avvio manuale (senza Docker)
+python -m src.run_api --host 0.0.0.0 --port 5000
+```
+
+### Endpoint Principali
+
+1. **Avvia una pianificazione**
+   - `POST /api/v1/schedule`
+   - Parametri: task_ids, initial_horizon_days, horizon_extension_factor
+   - Risposta: 202 Accepted con dettagli della pianificazione avviata
+
+2. **Verifica lo stato della pianificazione**
+   - `GET /api/v1/schedule/status`
+   - Risposta: Stato attuale, tempi di esecuzione, messaggi
+
+3. **Recupera i risultati della pianificazione**
+   - `GET /api/v1/schedule/result`
+   - Risposta: Risultati completi in formato JSON
+
+### Integrazione con Odoo 12
+
+L'API può essere facilmente integrata con Odoo 12 creando un modulo personalizzato che estende i modelli `project.task` e `project.task.type`. Un esempio di implementazione è disponibile nel file `_tmp/odoo12_client_example.py`.
+
+```python
+# Esempio di chiamata API da Odoo 12
+def action_schedule_tasks(self):
+    task_ids = self.mapped('id')
+    response = requests.post(
+        "http://task-scheduler-api:5000/api/v1/schedule",
+        json={"task_ids": task_ids}
+    )
+    # Gestisci la risposta...
+```
+
+Per una documentazione completa dell'API, consultare il file `_tmp/API_README.md`.
 
 ## 🔄 Migrazione da SCIP
 

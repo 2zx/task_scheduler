@@ -33,5 +33,8 @@ RUN mkdir -p /app/logs /app/data && \
 RUN useradd -m appuser
 USER appuser
 
-# Comando di avvio
+# Esponi la porta per l'API
+EXPOSE 5000
+
+# Comando di avvio (può essere sovrascritto in docker-compose.yml)
 CMD ["python", "-m", "src.run"]
