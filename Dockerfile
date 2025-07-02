@@ -5,8 +5,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     DEBIAN_FRONTEND=noninteractive
 
-# Strategia 1: Installazione pacchetti in più passaggi per ridurre l'uso di memoria
-RUN apt-get update && \
+# Rimuovi lo script problematico di APT e installa dipendenze
+RUN rm -f /etc/apt/apt.conf.d/docker-clean && \
+    apt-get update && \
     apt-get install -y --no-install-recommends \
         build-essential \
     && apt-get clean \
