@@ -1,38 +1,35 @@
-
 services:
-  task-scheduler:
-    image: python:3.11
-    container_name: task-scheduler
-    working_dir: /app
+
+  task-scheduler-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: task-scheduler-api
     user: "0:0"  # Esegui come root per evitare problemi di permessi
-    command: >
-      bash -c "
-      pip install psycopg2-binary python-dotenv ortools flask flask-restful flask-cors sqlalchemy &&
-      pip install -e . --no-deps &&
-      mkdir -p /app/logs /app/data &&
-      chmod -R 777 /app/logs /app/data &&
-      python -m src.run_api --host 0.0.0.0 --port 5000
-      "
+    command: python -m src.run_api --host 0.0.0.0 --port 5000
+    ports:
+      - "5000:5000"
+    # Aumenta i limiti di memoria per il container
+    mem_limit: 4g
+    memswap_limit: 2g
     volumes:
       - ./src:/app/src
       - ./logs:/app/logs
       - ./data:/app/data
-      - ./setup.py:/app/setup.py
-      - ./README.md:/app/README.md
       - ~/.ssh/id_rsa:/app/ssh_key:ro
     env_file:
       - .env
     environment:
       - PYTHONUNBUFFERED=1
       - LOG_LEVEL=INFO
-    stdin_open: true
-    tty: true
     restart: unless-stopped
-    ports:
-      - "5000:5000"
     networks:
       - scip-network
 
 networks:
   scip-network:
     driver: bridge
+
+volumes:
+  postgres_data:
+
