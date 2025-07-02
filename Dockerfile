@@ -5,30 +5,24 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Installa solo le dipendenze Python pure (senza compilazione)
-COPY requirements.txt .
-
-# Installa pacchetti in piccoli batch per evitare problemi di threading
-RUN pip install --no-cache-dir --disable-pip-version-check \
-        pandas psycopg2-binary sshtunnel python-dotenv
-
-RUN pip install --no-cache-dir --disable-pip-version-check \
-        pytest pytest-cov
-
-RUN pip install --no-cache-dir --disable-pip-version-check \
-        ortools
-
-RUN pip install --no-cache-dir --disable-pip-version-check \
-        matplotlib seaborn plotly
-
-RUN pip install --no-cache-dir --disable-pip-version-check \
-        flask flask-restful flask-cors gunicorn sqlalchemy
+# Installa i pacchetti essenziali uno alla volta
+RUN pip install --no-cache-dir --disable-pip-version-check pandas
+RUN pip install --no-cache-dir --disable-pip-version-check psycopg2-binary
+RUN pip install --no-cache-dir --disable-pip-version-check sshtunnel
+RUN pip install --no-cache-dir --disable-pip-version-check python-dotenv
+RUN pip install --no-cache-dir --disable-pip-version-check ortools
+RUN pip install --no-cache-dir --disable-pip-version-check flask
+RUN pip install --no-cache-dir --disable-pip-version-check flask-restful
+RUN pip install --no-cache-dir --disable-pip-version-check flask-cors
+RUN pip install --no-cache-dir --disable-pip-version-check matplotlib
+RUN pip install --no-cache-dir --disable-pip-version-check plotly
+RUN pip install --no-cache-dir --disable-pip-version-check sqlalchemy
 
 # Copia codice sorgente
 COPY ./src /app/src
 COPY setup.py README.md ./
 
-# Installa il pacchetto in modalità sviluppo
+# Installa il pacchetto senza dipendenze
 RUN pip install -e . --no-deps
 
 # Crea directory
