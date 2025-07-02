@@ -5,10 +5,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
 # Installa dipendenze di sistema minime
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y build-essential
+RUN apt-get clean
+RUN rm -rf /var/lib/apt/lists/*
 
 # Crea e attiva l'ambiente dell'applicazione
 WORKDIR /app
