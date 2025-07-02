@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import pandas as pd
 from flask import Flask, request, jsonify
 from flask_restful import Api, Resource
 from flask_cors import CORS
@@ -8,8 +9,6 @@ import time
 from datetime import datetime
 
 from .config import setup_logging, ORTOOLS_PARAMS
-from .fetch import get_tasks, get_calendar_slots, get_leaves
-from .db import get_db_connection, close_connection
 from .scheduler.model import SchedulingModel
 
 # Configura il logging
@@ -50,11 +49,48 @@ class ScheduleResource(Resource):
             schema:
               type: object
               properties:
-                task_ids:
+                tasks:
                   type: array
                   items:
-                    type: integer
-                  description: Lista di ID dei task da pianificare
+                    type: object
+                    properties:
+                      id:
+                        type: integer
+                      name:
+                        type: string
+                      user_id:
+                        type: integer
+                      planned_hours:
+                        type: number
+                  description: Lista dei task da pianificare con tutti i dati necessari
+                calendar_slots:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      task_id:
+                        type: integer
+                      dayofweek:
+                        type: integer
+                      hour_from:
+                        type: number
+                      hour_to:
+                        type: number
+                  description: Slot di calendario disponibili per ogni task
+                leaves:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      task_id:
+                        type: integer
+                      date_from:
+                        type: string
+                        format: date
+                      date_to:
+                        type: string
+                        format: date
+                  description: Assenze pianificate
                 initial_horizon_days:
                   type: integer
                   description: Orizzonte temporale iniziale in giorni
@@ -80,16 +116,44 @@ class ScheduleResource(Resource):
 
         # Ottieni i parametri dalla richiesta
         data = request.get_json() or {}
-        task_ids = data.get("task_ids", None)
+
+        # Nuovi parametri per dati completi
+        tasks_data = data.get("tasks", [])
+        calendar_slots_data = data.get("calendar_slots", [])
+        leaves_data = data.get("leaves", [])
         initial_horizon_days = data.get("initial_horizon_days", 28)
         horizon_extension_factor = data.get("horizon_extension_factor", 1.25)
 
-        # Valida i parametri
-        if task_ids is not None and not isinstance(task_ids, list):
+        # Supporto per backward compatibility con task_ids
+        task_ids = data.get("task_ids", None)
+        if task_ids is not None and not tasks_data:
             return {
                 "status": "error",
-                "message": "Il parametro task_ids deve essere una lista di interi"
+                "message": "Formato deprecato: utilizzare 'tasks', 'calendar_slots' e 'leaves' invece di 'task_ids'"
             }, 400
+
+        # Valida i parametri
+        if not tasks_data:
+            return {
+                "status": "error",
+                "message": "Il parametro 'tasks' è obbligatorio e non può essere vuoto"
+            }, 400
+
+        if not isinstance(tasks_data, list):
+            return {
+                "status": "error",
+                "message": "Il parametro 'tasks' deve essere una lista"
+            }, 400
+
+        # Valida la struttura dei task
+        required_task_fields = ['id', 'name', 'user_id', 'planned_hours']
+        for task in tasks_data:
+            for field in required_task_fields:
+                if field not in task:
+                    return {
+                        "status": "error",
+                        "message": f"Campo obbligatorio '{field}' mancante nel task {task.get('id', 'sconosciuto')}"
+                    }, 400
 
         # Aggiorna lo stato
         scheduler_status["status"] = "running"
@@ -102,7 +166,7 @@ class ScheduleResource(Resource):
         import threading
         thread = threading.Thread(
             target=self._run_scheduler,
-            args=(task_ids, initial_horizon_days, horizon_extension_factor)
+            args=(tasks_data, calendar_slots_data, leaves_data, initial_horizon_days, horizon_extension_factor)
         )
         thread.daemon = True
         thread.start()
@@ -110,37 +174,31 @@ class ScheduleResource(Resource):
         return {
             "status": "accepted",
             "message": "Pianificazione avviata",
-            "task_ids": task_ids,
+            "tasks_count": len(tasks_data),
+            "calendar_slots_count": len(calendar_slots_data),
+            "leaves_count": len(leaves_data),
             "initial_horizon_days": initial_horizon_days,
             "horizon_extension_factor": horizon_extension_factor
         }, 202  # Accepted
 
-    def _run_scheduler(self, task_ids=None, initial_horizon_days=28, horizon_extension_factor=1.25):
+    def _run_scheduler(self, tasks_data, calendar_slots_data, leaves_data, initial_horizon_days=28, horizon_extension_factor=1.25):
         """
-        Esegue il processo di pianificazione in background
+        Esegue il processo di pianificazione in background utilizzando i dati forniti direttamente
         """
         global scheduler_status
-        logger.info(f"Avvio pianificazione API con task_ids={task_ids}, "
+        logger.info(f"Avvio pianificazione API con {len(tasks_data)} tasks, "
+                   f"{len(calendar_slots_data)} calendar slots, {len(leaves_data)} leaves, "
                    f"initial_horizon_days={initial_horizon_days}, "
                    f"horizon_extension_factor={horizon_extension_factor}")
 
         try:
-            # Ottieni la connessione al database
-            conn, ssh_server = get_db_connection()
-
-            if conn is None:
-                error_msg = "Impossibile stabilire una connessione al database"
-                logger.error(error_msg)
-                scheduler_status["status"] = "error"
-                scheduler_status["message"] = error_msg
-                scheduler_status["end_time"] = datetime.now().isoformat()
-                return
-
-            # Recupera i dati necessari
-            tasks_df = get_tasks(task_ids)
+            # Converti i dati JSON in DataFrame pandas
+            tasks_df = self._convert_tasks_to_dataframe(tasks_data)
+            calendar_slots_df = self._convert_calendar_slots_to_dataframe(calendar_slots_data)
+            leaves_df = self._convert_leaves_to_dataframe(leaves_data)
 
             if tasks_df.empty:
-                error_msg = "Nessun task trovato per la pianificazione"
+                error_msg = "Nessun task valido fornito per la pianificazione"
                 logger.error(error_msg)
                 scheduler_status["status"] = "error"
                 scheduler_status["message"] = error_msg
@@ -149,12 +207,8 @@ class ScheduleResource(Resource):
 
             task_ids = tasks_df['id'].tolist()
             logger.info(f"Pianificazione delle attività con IDs: {task_ids}")
-
-            calendar_slots_df = get_calendar_slots(task_ids)
-            logger.info(f"Recuperati {len(calendar_slots_df)} slot di calendario")
-
-            leaves_df = get_leaves(task_ids)
-            logger.info(f"Recuperate {len(leaves_df)} assenze")
+            logger.info(f"Utilizzando {len(calendar_slots_df)} slot di calendario")
+            logger.info(f"Utilizzando {len(leaves_df)} assenze")
 
             # Crea e risolvi il modello di ottimizzazione
             model = SchedulingModel(
@@ -197,9 +251,90 @@ class ScheduleResource(Resource):
             scheduler_status["message"] = error_msg
             scheduler_status["end_time"] = datetime.now().isoformat()
 
-        finally:
-            # Chiudi le connessioni
-            close_connection()
+    def _convert_tasks_to_dataframe(self, tasks_data):
+        """
+        Converte i dati dei task da JSON a DataFrame pandas
+        """
+        if not tasks_data:
+            return pd.DataFrame()
+
+        try:
+            df = pd.DataFrame(tasks_data)
+            # Assicurati che le colonne necessarie siano presenti
+            required_columns = ['id', 'name', 'user_id', 'planned_hours']
+            for col in required_columns:
+                if col not in df.columns:
+                    logger.error(f"Colonna obbligatoria '{col}' mancante nei dati dei task")
+                    return pd.DataFrame()
+
+            # Converti i tipi di dati
+            df['id'] = df['id'].astype(int)
+            df['user_id'] = df['user_id'].astype(int)
+            df['planned_hours'] = df['planned_hours'].astype(float)
+
+            logger.info(f"Convertiti {len(df)} task in DataFrame")
+            return df
+
+        except Exception as e:
+            logger.error(f"Errore nella conversione dei task in DataFrame: {str(e)}")
+            return pd.DataFrame()
+
+    def _convert_calendar_slots_to_dataframe(self, calendar_slots_data):
+        """
+        Converte i dati degli slot di calendario da JSON a DataFrame pandas
+        """
+        if not calendar_slots_data:
+            return pd.DataFrame()
+
+        try:
+            df = pd.DataFrame(calendar_slots_data)
+            # Assicurati che le colonne necessarie siano presenti
+            required_columns = ['task_id', 'dayofweek', 'hour_from', 'hour_to']
+            for col in required_columns:
+                if col not in df.columns:
+                    logger.warning(f"Colonna '{col}' mancante negli slot di calendario")
+                    return pd.DataFrame()
+
+            # Converti i tipi di dati
+            df['task_id'] = df['task_id'].astype(int)
+            df['dayofweek'] = df['dayofweek'].astype(int)
+            df['hour_from'] = df['hour_from'].astype(float)
+            df['hour_to'] = df['hour_to'].astype(float)
+
+            logger.info(f"Convertiti {len(df)} slot di calendario in DataFrame")
+            return df
+
+        except Exception as e:
+            logger.error(f"Errore nella conversione degli slot di calendario in DataFrame: {str(e)}")
+            return pd.DataFrame()
+
+    def _convert_leaves_to_dataframe(self, leaves_data):
+        """
+        Converte i dati delle assenze da JSON a DataFrame pandas
+        """
+        if not leaves_data:
+            return pd.DataFrame()
+
+        try:
+            df = pd.DataFrame(leaves_data)
+            # Assicurati che le colonne necessarie siano presenti
+            required_columns = ['task_id', 'date_from', 'date_to']
+            for col in required_columns:
+                if col not in df.columns:
+                    logger.warning(f"Colonna '{col}' mancante nelle assenze")
+                    return pd.DataFrame()
+
+            # Converti i tipi di dati
+            df['task_id'] = df['task_id'].astype(int)
+            df['date_from'] = pd.to_datetime(df['date_from'])
+            df['date_to'] = pd.to_datetime(df['date_to'])
+
+            logger.info(f"Convertite {len(df)} assenze in DataFrame")
+            return df
+
+        except Exception as e:
+            logger.error(f"Errore nella conversione delle assenze in DataFrame: {str(e)}")
+            return pd.DataFrame()
 
 
 class ScheduleStatusResource(Resource):
