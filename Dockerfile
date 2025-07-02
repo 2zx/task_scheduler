@@ -4,8 +4,8 @@ FROM python:3.11-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-# Disabilita gli script post-invoke di APT che causano errori in slim
-RUN echo 'APT::Update::Post-Invoke-Success "true";' > /etc/apt/apt.conf.d/no-postinvoke && \
+# Fix per APT::Update::Post-Invoke (rimuove lo script che causa errore)
+RUN rm -f /etc/apt/apt.conf.d/docker-clean && \
     apt-get update && \
     apt-get install -y build-essential && \
     rm -rf /var/lib/apt/lists/*
