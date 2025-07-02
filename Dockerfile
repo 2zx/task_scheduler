@@ -4,10 +4,11 @@ FROM python:3.11-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-# Installa dipendenze di sistema minime
-RUN apt-get update && apt-get install -y build-essential
-RUN apt-get clean
-RUN rm -rf /var/lib/apt/lists/*
+# Disabilita gli script post-invoke di APT che causano errori in slim
+RUN echo 'APT::Update::Post-Invoke-Success "true";' > /etc/apt/apt.conf.d/no-postinvoke && \
+    apt-get update && \
+    apt-get install -y build-essential && \
+    rm -rf /var/lib/apt/lists/*
 
 # Crea e attiva l'ambiente dell'applicazione
 WORKDIR /app
@@ -24,7 +25,7 @@ COPY setup.py README.md ./
 # Installa il pacchetto in modalità sviluppo
 RUN pip install -e .
 
-# Crea directory per log e dati
+# Crea directory per log e dati con permessi adeguati
 RUN mkdir -p /app/logs /app/data && \
     chmod -R 777 /app/logs /app/data
 
