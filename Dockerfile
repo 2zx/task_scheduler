@@ -8,24 +8,21 @@ WORKDIR /app
 # Installa solo le dipendenze Python pure (senza compilazione)
 COPY requirements.txt .
 
-# Modifica requirements.txt per versioni precompilate
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir --only-binary=all \
-        pandas \
-        psycopg2-binary \
-        sshtunnel \
-        python-dotenv \
-        pytest \
-        pytest-cov \
-        ortools \
-        matplotlib \
-        seaborn \
-        plotly \
-        flask \
-        flask-restful \
-        flask-cors \
-        gunicorn \
-        sqlalchemy
+# Installa pacchetti in piccoli batch per evitare problemi di threading
+RUN pip install --no-cache-dir --disable-pip-version-check \
+        pandas psycopg2-binary sshtunnel python-dotenv
+
+RUN pip install --no-cache-dir --disable-pip-version-check \
+        pytest pytest-cov
+
+RUN pip install --no-cache-dir --disable-pip-version-check \
+        ortools
+
+RUN pip install --no-cache-dir --disable-pip-version-check \
+        matplotlib seaborn plotly
+
+RUN pip install --no-cache-dir --disable-pip-version-check \
+        flask flask-restful flask-cors gunicorn sqlalchemy
 
 # Copia codice sorgente
 COPY ./src /app/src
