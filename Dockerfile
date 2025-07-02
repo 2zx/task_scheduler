@@ -2,19 +2,23 @@ FROM python:3.11-slim
 
 # Imposta variabili di ambiente
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    DEBIAN_FRONTEND=noninteractive
 
-# Fix per APT::Update::Post-Invoke (rimuove lo script che causa errore)
-RUN rm -f /etc/apt/apt.conf.d/docker-clean && \
-    apt-get update && \
-    apt-get install -y build-essential && \
-    rm -rf /var/lib/apt/lists/*
+# Strategia 1: Installazione pacchetti in più passaggi per ridurre l'uso di memoria
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        build-essential \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 # Crea e attiva l'ambiente dell'applicazione
 WORKDIR /app
 
-# Copia e installa le dipendenze Python
+# Copia e installa le dipendenze Python in passaggi separati
 COPY requirements.txt .
+
+# Installa le dipendenze Python
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
