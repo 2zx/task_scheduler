@@ -1,8 +1,12 @@
-
 services:
   task-scheduler:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: task-scheduler
+    # Aumenta i limiti di memoria per il container
+    mem_limit: 4g
+    memswap_limit: 2g
     volumes:
       - ./src:/app/src
       - ./logs:/app/logs
@@ -20,11 +24,16 @@ services:
       - scip-network
 
   task-scheduler-api:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: task-scheduler-api
     command: python -m src.run_api --host 0.0.0.0 --port 5000
     ports:
       - "5000:5000"
+    # Aumenta i limiti di memoria per il container
+    mem_limit: 4g
+    memswap_limit: 2g
     volumes:
       - ./src:/app/src
       - ./logs:/app/logs
