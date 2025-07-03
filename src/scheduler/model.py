@@ -539,12 +539,14 @@ class LegacySchedulingModel:
             if self.solver.Value(var):  # Variabile booleana attiva
                 task_id, date, hour = key
 
-                if task_id not in solution['tasks']:
-                    solution['tasks'][task_id] = []
+                # Converti task_id in stringa per JSON serialization
+                task_id_str = str(int(task_id))
+                if task_id_str not in solution['tasks']:
+                    solution['tasks'][task_id_str] = []
 
-                solution['tasks'][task_id].append({
+                solution['tasks'][task_id_str].append({
                     'date': date.strftime('%Y-%m-%d'),
-                    'hour': hour
+                    'hour': int(hour)  # Assicura che hour sia int standard
                 })
 
         self.solution = solution

@@ -390,15 +390,17 @@ class IntervalSchedulingModel:
                 slot = self.contiguous_slots[slot_idx]
                 duration = self.solver.Value(self.vars['duration'][task_id, slot_idx])
 
-                if task_id not in solution['tasks']:
-                    solution['tasks'][task_id] = []
+                # Converti task_id in stringa per JSON serialization
+                task_id_str = str(int(task_id))
+                if task_id_str not in solution['tasks']:
+                    solution['tasks'][task_id_str] = []
 
                 # Converti in formato compatibile (slot orari)
                 start_hour = slot.start_datetime.hour
                 for h in range(duration):
-                    solution['tasks'][task_id].append({
+                    solution['tasks'][task_id_str].append({
                         'date': slot.start_datetime.date().strftime('%Y-%m-%d'),
-                        'hour': start_hour + h
+                        'hour': int(start_hour + h)  # Assicura che hour sia int standard
                     })
 
         self.solution = solution

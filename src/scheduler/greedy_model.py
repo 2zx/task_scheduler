@@ -437,12 +437,14 @@ class GreedySchedulingModel:
         }
 
         for task_id, slots in schedule.items():
-            solution['tasks'][task_id] = []
+            # Converti task_id in int standard Python per JSON serialization
+            task_id_str = str(int(task_id))
+            solution['tasks'][task_id_str] = []
 
             for slot in slots:
-                solution['tasks'][task_id].append({
+                solution['tasks'][task_id_str].append({
                     'date': slot.date,
-                    'hour': slot.hour
+                    'hour': int(slot.hour)  # Assicura che anche hour sia int standard
                 })
 
         self.solution = solution
