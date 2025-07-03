@@ -146,7 +146,7 @@ class ScheduleResource(Resource):
             }, 400
 
         # Valida la struttura dei task
-        required_task_fields = ['id', 'name', 'user_id', 'planned_hours']
+        required_task_fields = ['id', 'name', 'user_id', 'remaining_hours']
         for task in tasks_data:
             for field in required_task_fields:
                 if field not in task:
@@ -261,7 +261,7 @@ class ScheduleResource(Resource):
         try:
             df = pd.DataFrame(tasks_data)
             # Assicurati che le colonne necessarie siano presenti
-            required_columns = ['id', 'name', 'user_id', 'planned_hours']
+            required_columns = ['id', 'name', 'user_id', 'remaining_hours']
             for col in required_columns:
                 if col not in df.columns:
                     logger.error(f"Colonna obbligatoria '{col}' mancante nei dati dei task")
@@ -270,7 +270,15 @@ class ScheduleResource(Resource):
             # Converti i tipi di dati
             df['id'] = df['id'].astype(int)
             df['user_id'] = df['user_id'].astype(int)
-            df['planned_hours'] = df['planned_hours'].astype(float)
+            df['remaining_hours'] = df['remaining_hours'].astype(float)
+
+            # Filtra task con remaining_hours <= 0
+            original_count = len(df)
+            df = df[df['remaining_hours'] > 0]
+            filtered_count = len(df)
+
+            if filtered_count < original_count:
+                logger.info(f"Filtrati task con ore rimanenti > 0: {filtered_count}/{original_count} task validi")
 
             # Gestisci priority_score (opzionale, default 50.0)
             if 'priority_score' in df.columns:

@@ -5,7 +5,7 @@ from ortools.sat.python import cp_model
 from dataclasses import dataclass
 from typing import List, Dict, Tuple
 
-from ..config import ORTOOLS_PARAMS
+from ..config import ORTOOLS_PARAMS, SCHEDULER_CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -362,7 +362,7 @@ class IntervalSchedulingModel:
         else:
             logger.warning("Nessun termine nell'obiettivo!")
 
-    def solve(self, max_horizon_days=365 * 5):
+    def solve(self, max_horizon_days=SCHEDULER_CONFIG['max_horizon_days']):
         """Risolve il modello interval-based"""
         logger.info("Avvio risoluzione modello interval-based")
 

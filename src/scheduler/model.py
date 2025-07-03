@@ -3,7 +3,7 @@ import pandas as pd
 from datetime import datetime, timedelta, timezone
 from ortools.sat.python import cp_model
 
-from ..config import ORTOOLS_PARAMS
+from ..config import ORTOOLS_PARAMS, SCHEDULER_CONFIG
 from .interval_model import IntervalSchedulingModel
 from .greedy_model import GreedySchedulingModel, should_use_greedy
 
@@ -65,7 +65,7 @@ class SchedulingModel:
         self.solution = None
         self.tasks_df = tasks_df
 
-    def solve(self, max_horizon_days=365 * 5):
+    def solve(self, max_horizon_days=SCHEDULER_CONFIG['max_horizon_days']):
         """Risolve il modello di ottimizzazione con strategia ibrida"""
 
         if self.algorithm_used == 'greedy':
@@ -456,7 +456,7 @@ class LegacySchedulingModel:
         if all_day_vars:
             self.model.Minimize(sum(all_day_vars))
 
-    def solve(self, max_horizon_days=365 * 5):  # 5 anni come limite massimo
+    def solve(self, max_horizon_days=SCHEDULER_CONFIG['max_horizon_days']):
         """
         Risolve il modello di ottimizzazione estendendo l'orizzonte se necessario.
 
