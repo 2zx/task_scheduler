@@ -112,14 +112,15 @@ class GreedySchedulingModel:
             weeks_needed = math.ceil(total_hours / working_hours_per_week)
             days_needed = weeks_needed * 7  # Include weekend
 
-            # Aggiungi buffer del 25%
-            days_with_buffer = int(days_needed * 1.25)
+            # Aggiungi buffer del 50% per task lunghi
+            days_with_buffer = int(days_needed * 1.5)
             max_horizon_needed = max(max_horizon_needed, days_with_buffer)
 
-        # Limita orizzonte massimo per performance
-        self.horizon_days = min(max_horizon_needed, 180)  # Max 6 mesi
+        # Rimuovi limite fisso - permetti estensione fino a 5 anni se necessario
+        max_allowed_days = 1825  # 5 anni
+        self.horizon_days = min(max_horizon_needed, max_allowed_days)
 
-        logger.info(f"Orizzonte ottimizzato: {self.horizon_days} giorni")
+        logger.info(f"Orizzonte ottimizzato: {self.horizon_days} giorni (max consentito: {max_allowed_days})")
 
     def _generate_available_blocks(self):
         """Genera blocchi di tempo disponibili per ogni risorsa"""
@@ -218,25 +219,60 @@ class GreedySchedulingModel:
             logger.info(f"Rimossi {removed_count} blocchi a causa di assenze")
 
     def solve(self) -> bool:
-        """Risolve la pianificazione usando l'algoritmo greedy"""
+        """Risolve la pianificazione usando l'algoritmo greedy con estensione dinamica dell'orizzonte"""
 
         start_time = datetime.now()
         logger.info("Avvio risoluzione greedy")
 
+        max_allowed_days = 1825  # 5 anni massimo
+        extension_attempts = 0
+        max_attempts = 5
+
         try:
-            # Esegui algoritmo greedy
-            schedule = self._greedy_algorithm()
+            while extension_attempts < max_attempts:
+                # Esegui algoritmo greedy
+                schedule = self._greedy_algorithm()
+
+                # Calcola tasso di successo
+                success_rate = len(schedule) / len(self.tasks_df) if len(self.tasks_df) > 0 else 0
+
+                # Se abbiamo schedulato tutti i task o almeno l'80%, siamo soddisfatti
+                if success_rate >= 0.8:
+                    logger.info(f"Greedy riuscito con {success_rate:.1%} di task schedulati")
+                    break
+
+                # Se non abbiamo schedulato abbastanza task, estendi l'orizzonte
+                if self.horizon_days >= max_allowed_days:
+                    logger.warning(f"Raggiunto orizzonte massimo di {max_allowed_days} giorni")
+                    break
+
+                # Estendi orizzonte
+                old_horizon = self.horizon_days
+                self.horizon_days = min(int(self.horizon_days * 2), max_allowed_days)
+                extension_attempts += 1
+
+                logger.info(f"Estensione orizzonte #{extension_attempts}: {old_horizon} → {self.horizon_days} giorni (schedulati {len(schedule)}/{len(self.tasks_df)} task)")
+
+                # Rigenera blocchi con nuovo orizzonte
+                self._generate_available_blocks()
+                self._apply_leaves_to_blocks()
+
+                # Reset slot occupati per nuovo tentativo
+                for user_id in self.occupied_slots:
+                    for date in self.occupied_slots[user_id]:
+                        self.occupied_slots[user_id][date] = []
 
             # Converti in formato compatibile
             self._convert_to_solution_format(schedule)
 
-            # Calcola statistiche
+            # Calcola statistiche finali
             end_time = datetime.now()
             self.stats['execution_time'] = (end_time - start_time).total_seconds()
             self.stats['tasks_scheduled'] = len(schedule)
             self.stats['success_rate'] = len(schedule) / len(self.tasks_df)
+            self.stats['horizon_extensions'] = extension_attempts
 
-            logger.info(f"Greedy completato: {len(schedule)}/{len(self.tasks_df)} task schedulati in {self.stats['execution_time']:.2f}s")
+            logger.info(f"Greedy completato: {len(schedule)}/{len(self.tasks_df)} task schedulati in {self.stats['execution_time']:.2f}s (estensioni: {extension_attempts})")
 
             return len(schedule) > 0
 
@@ -270,12 +306,22 @@ class GreedySchedulingModel:
         return schedule
 
     def _find_consecutive_slots(self, user_id: int, hours_needed: float, task_id: int) -> List[ScheduledSlot]:
-        """Trova slot consecutivi ottimali per un task"""
+        """Trova slot consecutivi ottimali per un task, anche attraverso più giorni"""
 
         if user_id not in self.available_blocks:
             return []
 
         hours_needed_int = int(math.ceil(hours_needed))
+
+        # Per task molto lunghi, usa algoritmo multi-giorno
+        if hours_needed_int > 40:  # Più di una settimana lavorativa
+            return self._find_multi_day_slots(user_id, hours_needed_int, task_id)
+        else:
+            # Per task normali, usa algoritmo originale ottimizzato
+            return self._find_single_day_slots(user_id, hours_needed_int, task_id)
+
+    def _find_single_day_slots(self, user_id: int, hours_needed_int: int, task_id: int) -> List[ScheduledSlot]:
+        """Trova slot consecutivi all'interno di singoli giorni"""
 
         # Ordina blocchi per data (priorità ai primi disponibili)
         blocks = sorted(self.available_blocks[user_id], key=lambda b: b.start_datetime)
@@ -315,6 +361,62 @@ class GreedySchedulingModel:
                 return consecutive_slots[:hours_needed_int]
 
         return []
+
+    def _find_multi_day_slots(self, user_id: int, hours_needed_int: int, task_id: int) -> List[ScheduledSlot]:
+        """Trova slot consecutivi attraverso più giorni per task molto lunghi"""
+
+        logger.debug(f"Ricerca multi-giorno per task {task_id}: {hours_needed_int} ore")
+
+        # Raggruppa blocchi per giorno e ordina cronologicamente
+        blocks_by_date = {}
+        for block in self.available_blocks[user_id]:
+            date_str = block.start_datetime.strftime('%Y-%m-%d')
+            if date_str not in blocks_by_date:
+                blocks_by_date[date_str] = []
+            blocks_by_date[date_str].append(block)
+
+        # Ordina le date
+        sorted_dates = sorted(blocks_by_date.keys())
+
+        consecutive_slots = []
+
+        # Scorri i giorni in ordine cronologico
+        for date_str in sorted_dates:
+            if len(consecutive_slots) >= hours_needed_int:
+                break
+
+            occupied_hours = self.occupied_slots[user_id].get(date_str, [])
+            day_blocks = sorted(blocks_by_date[date_str], key=lambda b: b.start_datetime.hour)
+
+            # Per ogni blocco del giorno
+            for block in day_blocks:
+                if len(consecutive_slots) >= hours_needed_int:
+                    break
+
+                start_hour = block.start_datetime.hour
+                end_hour = block.end_datetime.hour
+
+                # Aggiungi tutte le ore disponibili del blocco
+                for hour in range(start_hour, end_hour):
+                    if len(consecutive_slots) >= hours_needed_int:
+                        break
+
+                    if hour not in occupied_hours:
+                        slot = ScheduledSlot(
+                            task_id=task_id,
+                            user_id=user_id,
+                            date=date_str,
+                            hour=hour
+                        )
+                        consecutive_slots.append(slot)
+
+        # Verifica se abbiamo trovato abbastanza slot
+        if len(consecutive_slots) >= hours_needed_int:
+            logger.debug(f"Task {task_id}: trovati {len(consecutive_slots)} slot multi-giorno")
+            return consecutive_slots[:hours_needed_int]
+        else:
+            logger.debug(f"Task {task_id}: trovati solo {len(consecutive_slots)}/{hours_needed_int} slot")
+            return []
 
     def _mark_slots_occupied(self, user_id: int, slots: List[ScheduledSlot]):
         """Marca gli slot come occupati"""
@@ -357,6 +459,7 @@ class GreedySchedulingModel:
             'tasks_total': self.stats['tasks_total'],
             'success_rate': self.stats['success_rate'],
             'horizon_days': self.horizon_days,
+            'horizon_extensions': self.stats.get('horizon_extensions', 0),
             'available_blocks_count': sum(len(blocks) for blocks in self.available_blocks.values())
         }
 
