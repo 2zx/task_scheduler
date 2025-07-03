@@ -276,10 +276,10 @@ class IntervalSchedulingModel:
     def _create_interval_constraints(self):
         """Crea vincoli per il modello interval-based"""
 
-        # 1. Vincolo durata: ogni task deve avere esattamente planned_hours
+        # 1. Vincolo durata: ogni task deve avere esattamente remaining_hours
         for _, task in self.tasks_df.iterrows():
             task_id = task['id']
-            planned_hours = int(task['planned_hours'])
+            remaining_hours = int(task['remaining_hours'])
 
             # Somma durate di tutti gli slot assegnati a questo task
             duration_vars = [
@@ -289,8 +289,8 @@ class IntervalSchedulingModel:
             ]
 
             if duration_vars:
-                self.model.Add(sum(duration_vars) == planned_hours)
-                logger.debug(f"Task {task_id}: vincolo durata {planned_hours} ore")
+                self.model.Add(sum(duration_vars) == remaining_hours)
+                logger.debug(f"Task {task_id}: vincolo durata {remaining_hours} ore")
 
         # 2. Vincolo non sovrapposizione: stessa risorsa non può fare 2 task contemporaneamente
         self._create_non_overlap_constraints()

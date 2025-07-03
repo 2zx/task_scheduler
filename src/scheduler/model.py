@@ -398,7 +398,7 @@ class LegacySchedulingModel:
         # Vincolo rigoroso: ogni task deve essere pianificato esattamente per le ore richieste
         for _, task in self.tasks_df.iterrows():
             task_id = task['id']
-            planned_hours = int(task['planned_hours'])
+            remaining_hours = int(task['remaining_hours'])
 
             task_vars = [
                 self.vars['x'][task_id, d, h]
@@ -409,8 +409,8 @@ class LegacySchedulingModel:
 
             if task_vars:  # Controlla che ci siano variabili disponibili
                 # Vincolo di uguaglianza stretta
-                self.model.Add(sum(task_vars) == planned_hours)
-                logger.debug(f"Task {task_id}: esattamente {planned_hours} ore")
+                self.model.Add(sum(task_vars) == remaining_hours)
+                logger.debug(f"Task {task_id}: esattamente {remaining_hours} ore")
 
         # Vincolo: una risorsa può svolgere al massimo un'attività per ogni slot orario
         for d in self.days:

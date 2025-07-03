@@ -60,8 +60,9 @@ class ScheduleResource(Resource):
                         type: string
                       user_id:
                         type: integer
-                      planned_hours:
+                      remaining_hours:
                         type: number
+                        description: Ore rimanenti da pianificare per il task
                   description: Lista dei task da pianificare con tutti i dati necessari
                 calendar_slots:
                   type: array

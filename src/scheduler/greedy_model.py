@@ -122,7 +122,7 @@ class GreedySchedulingModel:
         # Calcola orizzonte per ogni risorsa
         for user_id in self.tasks_df['user_id'].unique():
             user_tasks = self.tasks_df[self.tasks_df['user_id'] == user_id]
-            total_hours = user_tasks['planned_hours'].sum()
+            total_hours = user_tasks['remaining_hours'].sum()
 
             # Stima giorni necessari (8 ore lavorative/giorno, 5 giorni/settimana)
             working_hours_per_week = 40
