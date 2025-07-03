@@ -5,14 +5,15 @@ from ortools.sat.python import cp_model
 
 from ..config import ORTOOLS_PARAMS
 from .interval_model import IntervalSchedulingModel
+from .greedy_model import GreedySchedulingModel, should_use_greedy
 
 logger = logging.getLogger(__name__)
 
 
 class SchedulingModel:
     """
-    Modello di ottimizzazione per la pianificazione delle attività.
-    Utilizza il nuovo modello interval-based per performance ottimizzate.
+    Modello di ottimizzazione ibrido per la pianificazione delle attività.
+    Utilizza algoritmo greedy per centinaia di task o OrTools per casi complessi.
     """
 
     def __init__(self, tasks_df, calendar_slots_df, leaves_df, initial_horizon_days=28, horizon_extension_factor=1.25):
@@ -26,44 +27,137 @@ class SchedulingModel:
             initial_horizon_days: Numero di giorni dell'orizzonte temporale iniziale
             horizon_extension_factor: Fattore di estensione dell'orizzonte temporale
         """
-        logger.info("Inizializzazione SchedulingModel con nuovo modello interval-based")
+        logger.info("Inizializzazione SchedulingModel ibrido (Greedy + OrTools)")
 
-        # Determina quale modello utilizzare
-        use_interval_model = self._should_use_interval_model(tasks_df)
+        # Determina quale algoritmo utilizzare
+        use_greedy = should_use_greedy(tasks_df)
 
-        if use_interval_model:
-            logger.info("Utilizzo modello interval-based per performance ottimizzate")
+        if use_greedy:
+            logger.info("Utilizzo algoritmo GREEDY per performance ottimizzate")
+            self.model_impl = GreedySchedulingModel(
+                tasks_df, calendar_slots_df, leaves_df, initial_horizon_days
+            )
+            self.algorithm_used = 'greedy'
+        else:
+            logger.info("Utilizzo algoritmo ORTOOLS per ottimizzazione avanzata")
             self.model_impl = IntervalSchedulingModel(
                 tasks_df, calendar_slots_df, leaves_df,
                 initial_horizon_days, horizon_extension_factor
             )
-        else:
-            logger.info("Utilizzo modello orario legacy per compatibilità")
-            self.model_impl = LegacySchedulingModel(
-                tasks_df, calendar_slots_df, leaves_df,
-                initial_horizon_days, horizon_extension_factor
-            )
+            self.algorithm_used = 'ortools'
 
         # Esponi interfaccia compatibile
         self.solution = None
-
-    def _should_use_interval_model(self, tasks_df):
-        """
-        Determina se utilizzare il modello interval-based o quello legacy.
-        Per ora usa sempre il modello interval-based per le performance.
-        """
-        return True  # Sempre usa il nuovo modello
+        self.tasks_df = tasks_df
 
     def solve(self, max_horizon_days=365 * 5):
-        """Risolve il modello di ottimizzazione"""
-        success = self.model_impl.solve(max_horizon_days)
-        if success:
-            self.solution = self.model_impl.solution
-        return success
+        """Risolve il modello di ottimizzazione con strategia ibrida"""
+
+        if self.algorithm_used == 'greedy':
+            # Algoritmo greedy (sempre veloce)
+            success = self.model_impl.solve()
+
+            if success:
+                self.solution = self.model_impl.solution
+
+                # Verifica se ci sono task non schedulati
+                scheduled_tasks = set(self.solution['tasks'].keys())
+                all_tasks = set(self.tasks_df['id'].tolist())
+                unscheduled_tasks = all_tasks - scheduled_tasks
+
+                # Se ci sono pochi task non schedulati, prova OrTools per i residui
+                if unscheduled_tasks and len(unscheduled_tasks) <= 20:
+                    logger.info(f"Tentativo OrTools per {len(unscheduled_tasks)} task residui")
+                    success = self._solve_residual_with_ortools(unscheduled_tasks, max_horizon_days)
+
+                return success
+            else:
+                # Se greedy fallisce completamente, prova OrTools
+                logger.warning("Greedy fallito, tentativo con OrTools")
+                return self._fallback_to_ortools(max_horizon_days)
+
+        else:
+            # Algoritmo OrTools con timeout ridotto
+            success = self.model_impl.solve(max_horizon_days)
+            if success:
+                self.solution = self.model_impl.solution
+            return success
+
+    def _solve_residual_with_ortools(self, unscheduled_task_ids, max_horizon_days):
+        """Risolve task residui con OrTools"""
+
+        try:
+            # Filtra task non schedulati
+            residual_tasks = self.tasks_df[self.tasks_df['id'].isin(unscheduled_task_ids)]
+
+            # Crea modello OrTools per i residui
+            ortools_model = IntervalSchedulingModel(
+                residual_tasks,
+                self.model_impl.calendar_slots_df,
+                self.model_impl.leaves_df,
+                initial_horizon_days=14,  # Orizzonte ridotto per velocità
+                horizon_extension_factor=1.5
+            )
+
+            # Risolvi con timeout aggressivo
+            success = ortools_model.solve(max_horizon_days=60)
+
+            if success and ortools_model.solution:
+                # Unisci risultati greedy + ortools
+                self.solution['tasks'].update(ortools_model.solution['tasks'])
+                logger.info(f"OrTools ha schedulato {len(ortools_model.solution['tasks'])} task residui")
+                return True
+
+            return True  # Mantieni risultato greedy anche se OrTools fallisce
+
+        except Exception as e:
+            logger.error(f"Errore in OrTools residui: {str(e)}")
+            return True  # Mantieni risultato greedy
+
+    def _fallback_to_ortools(self, max_horizon_days):
+        """Fallback completo a OrTools se greedy fallisce"""
+
+        try:
+            logger.info("Fallback completo a OrTools")
+
+            # Crea modello OrTools con parametri aggressivi
+            self.model_impl = IntervalSchedulingModel(
+                self.tasks_df,
+                self.model_impl.calendar_slots_df,
+                self.model_impl.leaves_df,
+                initial_horizon_days=14,
+                horizon_extension_factor=1.25
+            )
+
+            # Configura timeout molto aggressivo
+            self.model_impl.solver.parameters.max_time_in_seconds = 30  # 30 secondi max
+
+            success = self.model_impl.solve(max_horizon_days=90)
+
+            if success:
+                self.solution = self.model_impl.solution
+                self.algorithm_used = 'ortools_fallback'
+
+            return success
+
+        except Exception as e:
+            logger.error(f"Errore in fallback OrTools: {str(e)}")
+            return False
 
     def get_solver_statistics(self):
-        """Restituisce statistiche del solver"""
-        return self.model_impl.get_solver_statistics()
+        """Restituisce statistiche del solver con informazioni sull'algoritmo utilizzato"""
+
+        stats = self.model_impl.get_solver_statistics()
+        stats['algorithm_used'] = self.algorithm_used
+
+        # Aggiungi statistiche specifiche per ibrido
+        if hasattr(self, 'solution') and self.solution:
+            stats['hybrid_success'] = True
+            stats['tasks_scheduled'] = len(self.solution.get('tasks', {}))
+            stats['tasks_total'] = len(self.tasks_df)
+            stats['success_rate'] = stats['tasks_scheduled'] / stats['tasks_total']
+
+        return stats
 
 
 class LegacySchedulingModel:

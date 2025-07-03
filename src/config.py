@@ -28,10 +28,21 @@ SSH_PARAMS = {
 
 # Parametri OrTools
 ORTOOLS_PARAMS = {
-    "time_limit": int(os.getenv("ORTOOLS_TIME_LIMIT", "3600")),  # secondi
+    "time_limit": int(os.getenv("ORTOOLS_TIME_LIMIT", "30")),  # Ridotto a 30 secondi per performance
     "num_search_workers": int(os.getenv("ORTOOLS_WORKERS", "4")),
     "log_search_progress": os.getenv("ORTOOLS_LOG_PROGRESS", "false").lower() == "true",
     "output_file": os.getenv("ORTOOLS_OUTPUT_FILE", "/app/data/schedule.json"),
+}
+
+# Parametri Scheduler Ibrido
+SCHEDULER_CONFIG = {
+    "greedy_threshold_tasks": int(os.getenv("GREEDY_THRESHOLD_TASKS", "50")),
+    "greedy_threshold_hours": int(os.getenv("GREEDY_THRESHOLD_HOURS", "1000")),
+    "greedy_threshold_users": int(os.getenv("GREEDY_THRESHOLD_USERS", "10")),
+    "greedy_threshold_avg_hours": int(os.getenv("GREEDY_THRESHOLD_AVG_HOURS", "100")),
+    "ortools_timeout_seconds": int(os.getenv("ORTOOLS_TIMEOUT_SECONDS", "30")),
+    "ortools_fallback_timeout": int(os.getenv("ORTOOLS_FALLBACK_TIMEOUT", "60")),
+    "hybrid_mode": os.getenv("HYBRID_MODE", "true").lower() == "true",
 }
 
 # Configurazione task
