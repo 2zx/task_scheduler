@@ -193,9 +193,8 @@ class GreedySchedulingModel:
                     duration = end_hour - start_hour
 
                     if duration > 0:
-                        # Crea datetime UTC-aware per compatibilità con Odoo
-                        start_datetime = datetime.combine(day, datetime.min.time(), timezone.utc) + timedelta(hours=start_hour)
-                        end_datetime = datetime.combine(day, datetime.min.time(), timezone.utc) + timedelta(hours=end_hour)
+                        start_datetime = datetime.combine(day, datetime.min.time()) + timedelta(hours=start_hour)
+                        end_datetime = datetime.combine(day, datetime.min.time()) + timedelta(hours=end_hour)
 
                         block = AvailableBlock(
                             user_id=user_id,
