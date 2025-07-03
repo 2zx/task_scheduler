@@ -43,10 +43,10 @@ SCHEDULER_CONFIG = {
     "ortools_timeout_seconds": int(os.getenv("ORTOOLS_TIMEOUT_SECONDS", "30")),
     "ortools_fallback_timeout": int(os.getenv("ORTOOLS_FALLBACK_TIMEOUT", "60")),
     "hybrid_mode": os.getenv("HYBRID_MODE", "true").lower() == "true",
-    # Limite massimo orizzonte temporale in giorni (default: 5 anni = 1825 giorni)
+    # Limite massimo orizzonte temporale in giorni (default: 10 anni = 3650 giorni)
     # Questo parametro controlla il limite massimo di giorni che il sistema
     # può considerare per la pianificazione prima di arrendersi
-    "max_horizon_days": int(os.getenv("MAX_HORIZON_DAYS", "1825")),
+    "max_horizon_days": int(os.getenv("MAX_HORIZON_DAYS", "3650")),  # 10 anni come default
 }
 
 # Configurazione task
