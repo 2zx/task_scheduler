@@ -272,6 +272,12 @@ class ScheduleResource(Resource):
             df['user_id'] = df['user_id'].astype(int)
             df['planned_hours'] = df['planned_hours'].astype(float)
 
+            # Gestisci priority_score (opzionale, default 50.0)
+            if 'priority_score' in df.columns:
+                df['priority_score'] = df['priority_score'].astype(float)
+            else:
+                df['priority_score'] = 50.0  # Valore default per priorità media
+
             logger.info(f"Convertiti {len(df)} task in DataFrame")
             return df
 

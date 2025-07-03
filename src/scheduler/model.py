@@ -4,14 +4,15 @@ from datetime import datetime, timedelta
 from ortools.sat.python import cp_model
 
 from ..config import ORTOOLS_PARAMS
+from .interval_model import IntervalSchedulingModel
 
 logger = logging.getLogger(__name__)
 
 
 class SchedulingModel:
     """
-    Modello di ottimizzazione per la pianificazione delle attività
-    utilizzando Google OrTools CP-SAT come solutore.
+    Modello di ottimizzazione per la pianificazione delle attività.
+    Utilizza il nuovo modello interval-based per performance ottimizzate.
     """
 
     def __init__(self, tasks_df, calendar_slots_df, leaves_df, initial_horizon_days=28, horizon_extension_factor=1.25):
@@ -19,11 +20,61 @@ class SchedulingModel:
         Inizializza il modello con i dati necessari.
 
         Args:
-            tasks_df: DataFrame con le attività da pianificare
+            tasks_df: DataFrame con le attività da pianificare (include priority_score)
             calendar_slots_df: DataFrame con gli slot disponibili nel calendario
             leaves_df: DataFrame con le assenze pianificate
             initial_horizon_days: Numero di giorni dell'orizzonte temporale iniziale
             horizon_extension_factor: Fattore di estensione dell'orizzonte temporale
+        """
+        logger.info("Inizializzazione SchedulingModel con nuovo modello interval-based")
+
+        # Determina quale modello utilizzare
+        use_interval_model = self._should_use_interval_model(tasks_df)
+
+        if use_interval_model:
+            logger.info("Utilizzo modello interval-based per performance ottimizzate")
+            self.model_impl = IntervalSchedulingModel(
+                tasks_df, calendar_slots_df, leaves_df,
+                initial_horizon_days, horizon_extension_factor
+            )
+        else:
+            logger.info("Utilizzo modello orario legacy per compatibilità")
+            self.model_impl = LegacySchedulingModel(
+                tasks_df, calendar_slots_df, leaves_df,
+                initial_horizon_days, horizon_extension_factor
+            )
+
+        # Esponi interfaccia compatibile
+        self.solution = None
+
+    def _should_use_interval_model(self, tasks_df):
+        """
+        Determina se utilizzare il modello interval-based o quello legacy.
+        Per ora usa sempre il modello interval-based per le performance.
+        """
+        return True  # Sempre usa il nuovo modello
+
+    def solve(self, max_horizon_days=365 * 5):
+        """Risolve il modello di ottimizzazione"""
+        success = self.model_impl.solve(max_horizon_days)
+        if success:
+            self.solution = self.model_impl.solution
+        return success
+
+    def get_solver_statistics(self):
+        """Restituisce statistiche del solver"""
+        return self.model_impl.get_solver_statistics()
+
+
+class LegacySchedulingModel:
+    """
+    Modello di ottimizzazione legacy (orario) per compatibilità.
+    Mantiene il codice originale per fallback se necessario.
+    """
+
+    def __init__(self, tasks_df, calendar_slots_df, leaves_df, initial_horizon_days=28, horizon_extension_factor=1.25):
+        """
+        Inizializza il modello legacy con i dati necessari.
         """
         self.tasks_df = tasks_df
         self.calendar_slots_df = calendar_slots_df
