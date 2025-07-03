@@ -1,11 +1,26 @@
 import logging
 import pandas as pd
 import math
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
+
+
+def get_utc_now():
+    """Restituisce datetime corrente in UTC"""
+    return datetime.now(timezone.utc)
+
+
+def get_utc_date():
+    """Restituisce data corrente in UTC"""
+    return get_utc_now().date()
+
+
+def get_next_business_date():
+    """Restituisce il primo giorno utile per la pianificazione (domani in UTC)"""
+    return get_utc_date() + timedelta(days=1)
 
 
 @dataclass
@@ -128,9 +143,11 @@ class GreedySchedulingModel:
         self.available_blocks = {}
         self.occupied_slots = {}
 
-        # Genera orizzonte temporale
-        today = datetime.now().date()
-        days = [today + timedelta(days=i) for i in range(self.horizon_days)]
+        # Genera orizzonte temporale - inizia dal primo giorno utile (domani in UTC)
+        first_day = get_next_business_date()
+        days = [first_day + timedelta(days=i) for i in range(self.horizon_days)]
+
+        logger.info(f"Pianificazione dal {first_day} per {self.horizon_days} giorni (UTC)")
 
         # Per ogni risorsa
         for user_id in self.tasks_df['user_id'].unique():
@@ -161,8 +178,9 @@ class GreedySchedulingModel:
                     duration = end_hour - start_hour
 
                     if duration > 0:
-                        start_datetime = datetime.combine(day, datetime.min.time()) + timedelta(hours=start_hour)
-                        end_datetime = datetime.combine(day, datetime.min.time()) + timedelta(hours=end_hour)
+                        # Crea datetime UTC-aware per compatibilità con Odoo
+                        start_datetime = datetime.combine(day, datetime.min.time(), timezone.utc) + timedelta(hours=start_hour)
+                        end_datetime = datetime.combine(day, datetime.min.time(), timezone.utc) + timedelta(hours=end_hour)
 
                         block = AvailableBlock(
                             user_id=user_id,

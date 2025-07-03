@@ -1,6 +1,6 @@
 import logging
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from ortools.sat.python import cp_model
 
 from ..config import ORTOOLS_PARAMS
@@ -8,6 +8,21 @@ from .interval_model import IntervalSchedulingModel
 from .greedy_model import GreedySchedulingModel, should_use_greedy
 
 logger = logging.getLogger(__name__)
+
+
+def get_utc_now():
+    """Restituisce datetime corrente in UTC"""
+    return datetime.now(timezone.utc)
+
+
+def get_utc_date():
+    """Restituisce data corrente in UTC"""
+    return get_utc_now().date()
+
+
+def get_next_business_date():
+    """Restituisce il primo giorno utile per la pianificazione (domani in UTC)"""
+    return get_utc_date() + timedelta(days=1)
 
 
 class SchedulingModel:
@@ -188,9 +203,11 @@ class LegacySchedulingModel:
         """Prepara e trasforma i dati per il modello di ottimizzazione"""
         logger.info(f"Preparazione dei dati per il modello di ottimizzazione con orizzonte di {self.current_horizon_days} giorni")
 
-        # Genera un orizzonte temporale di pianificazione basato sul parametro corrente
-        today = datetime.now().date()
-        self.days = [today + timedelta(days=i) for i in range(self.current_horizon_days)]
+        # Genera un orizzonte temporale di pianificazione - inizia dal primo giorno utile (domani in UTC)
+        first_day = get_next_business_date()
+        self.days = [first_day + timedelta(days=i) for i in range(self.current_horizon_days)]
+
+        logger.info(f"Pianificazione legacy dal {first_day} per {self.current_horizon_days} giorni (UTC)")
 
         # Mappa i giorni della settimana (0-6) alle date effettive
         self.day_to_date = {d.weekday(): d for d in self.days}

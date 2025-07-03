@@ -1,6 +1,6 @@
 import logging
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from ortools.sat.python import cp_model
 from dataclasses import dataclass
 from typing import List, Dict, Tuple
@@ -8,6 +8,21 @@ from typing import List, Dict, Tuple
 from ..config import ORTOOLS_PARAMS
 
 logger = logging.getLogger(__name__)
+
+
+def get_utc_now():
+    """Restituisce datetime corrente in UTC"""
+    return datetime.now(timezone.utc)
+
+
+def get_utc_date():
+    """Restituisce data corrente in UTC"""
+    return get_utc_now().date()
+
+
+def get_next_business_date():
+    """Restituisce il primo giorno utile per la pianificazione (domani in UTC)"""
+    return get_utc_date() + timedelta(days=1)
 
 
 @dataclass
@@ -67,9 +82,11 @@ class IntervalSchedulingModel:
         """Prepara e trasforma i dati per il modello interval-based"""
         logger.info(f"Preparazione dati interval-based con orizzonte di {self.current_horizon_days} giorni")
 
-        # Genera orizzonte temporale
-        today = datetime.now().date()
-        self.days = [today + timedelta(days=i) for i in range(self.current_horizon_days)]
+        # Genera orizzonte temporale - inizia dal primo giorno utile (domani in UTC)
+        first_day = get_next_business_date()
+        self.days = [first_day + timedelta(days=i) for i in range(self.current_horizon_days)]
+
+        logger.info(f"Pianificazione interval dal {first_day} per {self.current_horizon_days} giorni (UTC)")
 
         # Calcola slot contigui
         self._calculate_contiguous_slots()
@@ -134,8 +151,9 @@ class IntervalSchedulingModel:
         # Crea slot per ogni occorrenza di questo weekday nell'orizzonte
         for day in self.days:
             if day.weekday() == weekday:
-                start_datetime = datetime.combine(day, datetime.min.time()) + timedelta(hours=hour_from)
-                end_datetime = datetime.combine(day, datetime.min.time()) + timedelta(hours=hour_to)
+                # Crea datetime UTC-aware per compatibilità con Odoo
+                start_datetime = datetime.combine(day, datetime.min.time(), timezone.utc) + timedelta(hours=hour_from)
+                end_datetime = datetime.combine(day, datetime.min.time(), timezone.utc) + timedelta(hours=hour_to)
 
                 slot = ContiguousSlot(
                     task_id=task_id,
