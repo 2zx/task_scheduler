@@ -101,7 +101,16 @@ class GreedySchedulingModel:
         # Applica assenze
         self._apply_leaves_to_blocks()
 
-        logger.info(f"Preparazione completata: {sum(len(blocks) for blocks in self.available_blocks.values())} blocchi disponibili")
+        # Logging diagnostico dettagliato
+        total_blocks = sum(len(blocks) for blocks in self.available_blocks.values())
+        logger.info(f"Preparazione completata: {total_blocks} blocchi disponibili")
+
+        # Log dettagliato per ogni utente
+        for user_id in self.available_blocks:
+            user_blocks = len(self.available_blocks[user_id])
+            user_tasks = len(self.tasks_df[self.tasks_df['user_id'] == user_id])
+            user_hours = self.tasks_df[self.tasks_df['user_id'] == user_id]['remaining_hours'].sum()
+            logger.debug(f"User {user_id}: {user_blocks} blocchi, {user_tasks} task, {user_hours:.1f}h totali")
 
     def _sort_tasks_optimally(self):
         """Ordina i task per massimizzare l'efficacia dell'algoritmo greedy"""
@@ -157,15 +166,16 @@ class GreedySchedulingModel:
             self.occupied_slots[user_id] = {}
 
             # Trova slot di calendario per questa risorsa
+            user_task_ids = self.tasks_df[self.tasks_df['user_id'] == user_id]['id'].tolist()
             user_calendar = self.calendar_slots_df[
-                self.calendar_slots_df['task_id'].isin(
-                    self.tasks_df[self.tasks_df['user_id'] == user_id]['id']
-                )
+                self.calendar_slots_df['task_id'].isin(user_task_ids)
             ].drop_duplicates(['dayofweek', 'hour_from', 'hour_to'])
 
             if user_calendar.empty:
-                logger.warning(f"Nessun calendario trovato per user {user_id}")
+                logger.warning(f"Nessun calendario trovato per user {user_id} con {len(user_task_ids)} task")
                 continue
+
+            logger.debug(f"User {user_id}: {len(user_calendar)} slot di calendario unici")
 
             # Genera blocchi per ogni giorno
             for day in days:
@@ -277,10 +287,9 @@ class GreedySchedulingModel:
                 self._generate_available_blocks()
                 self._apply_leaves_to_blocks()
 
-                # Reset slot occupati per nuovo tentativo
-                for user_id in self.occupied_slots:
-                    for date in self.occupied_slots[user_id]:
-                        self.occupied_slots[user_id][date] = []
+                # Reset completo slot occupati per nuovo tentativo (include nuove date)
+                # Nota: _generate_available_blocks() già reinizializza self.occupied_slots
+                logger.debug(f"Reset completo slot occupati per estensione orizzonte")
 
             # Converti in formato compatibile
             self._convert_to_solution_format(schedule)
@@ -341,7 +350,7 @@ class GreedySchedulingModel:
             return self._find_single_day_slots(user_id, hours_needed_int, task_id)
 
     def _find_single_day_slots(self, user_id: int, hours_needed_int: int, task_id: int) -> List[ScheduledSlot]:
-        """Trova slot consecutivi all'interno di singoli giorni"""
+        """Trova slot consecutivi all'interno di singoli giorni con algoritmo migliorato"""
 
         # Ordina blocchi per data (priorità ai primi disponibili)
         blocks = sorted(self.available_blocks[user_id], key=lambda b: b.start_datetime)
@@ -360,8 +369,9 @@ class GreedySchedulingModel:
 
             consecutive_slots = []
             current_hour = start_hour
+            best_consecutive = []
 
-            while current_hour < end_hour and len(consecutive_slots) < hours_needed_int:
+            while current_hour < end_hour:
                 if current_hour not in occupied_hours:
                     slot = ScheduledSlot(
                         task_id=task_id,
@@ -371,14 +381,20 @@ class GreedySchedulingModel:
                     )
                     consecutive_slots.append(slot)
                 else:
-                    # Reset se troviamo un'ora occupata
+                    # Salva il miglior blocco consecutivo trovato finora
+                    if len(consecutive_slots) > len(best_consecutive):
+                        best_consecutive = consecutive_slots.copy()
                     consecutive_slots = []
 
                 current_hour += 1
 
+            # Controlla l'ultimo blocco consecutivo
+            if len(consecutive_slots) > len(best_consecutive):
+                best_consecutive = consecutive_slots
+
             # Se abbiamo trovato abbastanza slot consecutivi
-            if len(consecutive_slots) >= hours_needed_int:
-                return consecutive_slots[:hours_needed_int]
+            if len(best_consecutive) >= hours_needed_int:
+                return best_consecutive[:hours_needed_int]
 
         return []
 
