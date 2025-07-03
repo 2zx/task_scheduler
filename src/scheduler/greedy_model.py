@@ -107,7 +107,7 @@ class GreedySchedulingModel:
         """Ordina i task per massimizzare l'efficacia dell'algoritmo greedy"""
 
         # Ordinamento multi-criterio per ottimizzare greedy
-        sort_criteria = ['priority_score', 'planned_hours', 'user_id', 'id']
+        sort_criteria = ['priority_score', 'remaining_hours', 'user_id', 'id']
         sort_ascending = [True, False, True, True]  # Priorità alta, ore alte, user raggruppati
 
         self.tasks_df = self.tasks_df.sort_values(sort_criteria, ascending=sort_ascending)
@@ -311,7 +311,7 @@ class GreedySchedulingModel:
             user_id = task['user_id']
             hours_needed = task['remaining_hours']
 
-            logger.debug(f"Schedulando task {task_id}: {hours_needed}h rimanenti per user {user_id}")
+            logger.debug(f"Schedulando task {task_id}: {hours_needed}h remaining_hours per user {user_id}")
 
             # Trova slot consecutivi per questo task
             assigned_slots = self._find_consecutive_slots(user_id, hours_needed, task_id)
@@ -492,9 +492,7 @@ def should_use_greedy(tasks_df: pd.DataFrame) -> bool:
     """
 
     num_tasks = len(tasks_df)
-    # Usa remaining_hours se disponibile, altrimenti planned_hours per backward compatibility
-    hours_column = 'remaining_hours' if 'remaining_hours' in tasks_df.columns else 'planned_hours'
-    total_hours = tasks_df[hours_column].sum()
+    total_hours = tasks_df['remaining_hours'].sum()
     num_users = tasks_df['user_id'].nunique()
 
     # Usa greedy se:
@@ -512,6 +510,8 @@ def should_use_greedy(tasks_df: pd.DataFrame) -> bool:
         avg_hours > 100
     )
 
-    logger.info(f"Decisione algoritmo: tasks={num_tasks}, {hours_column}={total_hours:.1f}, users={num_users}, avg_hours={avg_hours:.1f} → {'GREEDY' if use_greedy else 'ORTOOLS'}")
+    logger.info(f"Decisione algoritmo: tasks={num_tasks}, remaining_hours={total_hours:.1f}, "
+                f"users={num_users}, avg_hours={avg_hours:.1f} → "
+                f"{'GREEDY' if use_greedy else 'ORTOOLS'}")
 
     return use_greedy
