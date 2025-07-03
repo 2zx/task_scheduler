@@ -3,8 +3,8 @@ import logging
 from logging.handlers import RotatingFileHandler
 import dotenv
 
-# Carica le variabili d'ambiente dal file .env
-dotenv.load_dotenv()
+# Carica le variabili d'ambiente dal file .env con override
+dotenv.load_dotenv(override=True)
 
 # Parametri di connessione al database
 DB_PARAMS = {
