@@ -149,7 +149,7 @@ class GreedySchedulingModel:
         logger.info(f"Orizzonte ottimizzato: {self.horizon_days} giorni (max consentito: {max_allowed_days})")
 
     def _generate_available_blocks(self):
-        """Genera blocchi di tempo disponibili per ogni risorsa"""
+        """Genera blocchi di tempo disponibili per ogni risorsa con logica migliorata"""
 
         self.available_blocks = {}
         self.occupied_slots = {}
@@ -165,17 +165,20 @@ class GreedySchedulingModel:
             self.available_blocks[user_id] = []
             self.occupied_slots[user_id] = {}
 
-            # Trova slot di calendario per questa risorsa
+            # CORREZIONE: Trova TUTTI gli slot di calendario per questa risorsa
+            # Non filtrare per task_id specifici, ma per tutti i task dell'utente
             user_task_ids = self.tasks_df[self.tasks_df['user_id'] == user_id]['id'].tolist()
+
+            # Prendi tutti gli slot unici per questo utente (senza duplicati)
             user_calendar = self.calendar_slots_df[
                 self.calendar_slots_df['task_id'].isin(user_task_ids)
-            ].drop_duplicates(['dayofweek', 'hour_from', 'hour_to'])
+            ].groupby(['dayofweek', 'hour_from', 'hour_to']).first().reset_index()
 
             if user_calendar.empty:
                 logger.warning(f"Nessun calendario trovato per user {user_id} con {len(user_task_ids)} task")
                 continue
 
-            logger.debug(f"User {user_id}: {len(user_calendar)} slot di calendario unici")
+            logger.debug(f"User {user_id}: {len(user_calendar)} slot di calendario unici (da {len(user_task_ids)} task)")
 
             # Genera blocchi per ogni giorno
             for day in days:
@@ -289,7 +292,7 @@ class GreedySchedulingModel:
 
                 # Reset completo slot occupati per nuovo tentativo (include nuove date)
                 # Nota: _generate_available_blocks() già reinizializza self.occupied_slots
-                logger.debug(f"Reset completo slot occupati per estensione orizzonte")
+                logger.debug("Reset completo slot occupati per estensione orizzonte")
 
             # Converti in formato compatibile
             self._convert_to_solution_format(schedule)
@@ -335,19 +338,187 @@ class GreedySchedulingModel:
         return schedule
 
     def _find_consecutive_slots(self, user_id: int, hours_needed: float, task_id: int) -> List[ScheduledSlot]:
-        """Trova slot consecutivi ottimali per un task, anche attraverso più giorni"""
+        """Trova slot ottimali per un task con algoritmo flessibile"""
 
         if user_id not in self.available_blocks:
+            logger.warning(f"Task {task_id}: User {user_id} non ha blocchi disponibili")
             return []
 
         hours_needed_int = int(math.ceil(hours_needed))
 
-        # Per task molto lunghi, usa algoritmo multi-giorno
-        if hours_needed_int > 40:  # Più di una settimana lavorativa
-            return self._find_multi_day_slots(user_id, hours_needed_int, task_id)
+        # Strategia multi-livello:
+        # 1. Prova algoritmo consecutivo tradizionale
+        # 2. Se fallisce, prova algoritmo flessibile (con gap)
+        # 3. Se fallisce, prova distribuzione multi-giorno
+
+        # Livello 1: Algoritmo consecutivo tradizionale
+        if hours_needed_int > 40:
+            slots = self._find_multi_day_slots(user_id, hours_needed_int, task_id)
         else:
-            # Per task normali, usa algoritmo originale ottimizzato
-            return self._find_single_day_slots(user_id, hours_needed_int, task_id)
+            slots = self._find_single_day_slots(user_id, hours_needed_int, task_id)
+
+        if slots:
+            logger.debug(f"Task {task_id}: Trovato con algoritmo consecutivo")
+            return slots
+
+        # Livello 2: Algoritmo flessibile (permette gap)
+        slots = self._find_flexible_slots(user_id, hours_needed_int, task_id)
+        if slots:
+            logger.debug(f"Task {task_id}: Trovato con algoritmo flessibile")
+            return slots
+
+        # Livello 3: Distribuzione multi-settimana per task lunghi
+        if hours_needed_int > 8:
+            slots = self._find_distributed_slots(user_id, hours_needed_int, task_id)
+            if slots:
+                logger.debug(f"Task {task_id}: Trovato con algoritmo distribuito")
+                return slots
+
+        # Debug: Perché il task è fallito?
+        self._debug_failed_task(user_id, hours_needed_int, task_id)
+        return []
+
+    def _find_flexible_slots(self, user_id: int, hours_needed_int: int, task_id: int) -> List[ScheduledSlot]:
+        """Algoritmo flessibile che permette gap tra slot (es. pausa pranzo)"""
+
+        logger.debug(f"Ricerca flessibile per task {task_id}: {hours_needed_int} ore")
+
+        # Raccogli tutti gli slot liberi disponibili
+        all_free_slots = []
+
+        # Ordina blocchi per data
+        blocks = sorted(self.available_blocks[user_id], key=lambda b: b.start_datetime)
+
+        for block in blocks:
+            date_str = block.start_datetime.strftime('%Y-%m-%d')
+            occupied_hours = self.occupied_slots[user_id].get(date_str, [])
+
+            start_hour = block.start_datetime.hour
+            end_hour = block.end_datetime.hour
+
+            # Aggiungi tutti gli slot liberi di questo blocco
+            for hour in range(start_hour, end_hour):
+                if hour not in occupied_hours:
+                    slot = ScheduledSlot(
+                        task_id=task_id,
+                        user_id=user_id,
+                        date=date_str,
+                        hour=hour
+                    )
+                    all_free_slots.append(slot)
+
+        # Se abbiamo abbastanza slot liberi, prendili
+        if len(all_free_slots) >= hours_needed_int:
+            # Raggruppa per giorno per ottimizzare la distribuzione
+            slots_by_date = {}
+            for slot in all_free_slots:
+                if slot.date not in slots_by_date:
+                    slots_by_date[slot.date] = []
+                slots_by_date[slot.date].append(slot)
+
+            # Prova a concentrare il task in pochi giorni
+            selected_slots = []
+            for date in sorted(slots_by_date.keys()):
+                day_slots = sorted(slots_by_date[date], key=lambda s: s.hour)
+
+                # Prendi tutti gli slot del giorno fino al limite necessario
+                for slot in day_slots:
+                    if len(selected_slots) >= hours_needed_int:
+                        break
+                    selected_slots.append(slot)
+
+                if len(selected_slots) >= hours_needed_int:
+                    break
+
+            if len(selected_slots) >= hours_needed_int:
+                logger.debug(f"Task {task_id}: trovati {len(selected_slots)} slot flessibili")
+                return selected_slots[:hours_needed_int]
+
+        return []
+
+    def _find_distributed_slots(self, user_id: int, hours_needed_int: int, task_id: int) -> List[ScheduledSlot]:
+        """Algoritmo distribuito per task lunghi - distribuisce su più settimane"""
+
+        logger.debug(f"Ricerca distribuita per task {task_id}: {hours_needed_int} ore")
+
+        # Raccogli slot liberi raggruppati per settimana
+        slots_by_week = {}
+
+        blocks = sorted(self.available_blocks[user_id], key=lambda b: b.start_datetime)
+
+        for block in blocks:
+            date_str = block.start_datetime.strftime('%Y-%m-%d')
+            date_obj = block.start_datetime.date()
+
+            # Calcola numero settimana
+            week_number = date_obj.isocalendar()[1]
+            year = date_obj.year
+            week_key = f"{year}-W{week_number:02d}"
+
+            if week_key not in slots_by_week:
+                slots_by_week[week_key] = []
+
+            occupied_hours = self.occupied_slots[user_id].get(date_str, [])
+
+            start_hour = block.start_datetime.hour
+            end_hour = block.end_datetime.hour
+
+            # Aggiungi slot liberi di questo blocco
+            for hour in range(start_hour, end_hour):
+                if hour not in occupied_hours:
+                    slot = ScheduledSlot(
+                        task_id=task_id,
+                        user_id=user_id,
+                        date=date_str,
+                        hour=hour
+                    )
+                    slots_by_week[week_key].append(slot)
+
+        # Distribuisci il task su più settimane (max 8 ore per settimana)
+        selected_slots = []
+        max_hours_per_week = 8
+
+        for week_key in sorted(slots_by_week.keys()):
+            if len(selected_slots) >= hours_needed_int:
+                break
+
+            week_slots = sorted(slots_by_week[week_key], key=lambda s: (s.date, s.hour))
+            hours_to_take = min(max_hours_per_week, hours_needed_int - len(selected_slots))
+
+            selected_slots.extend(week_slots[:hours_to_take])
+
+        if len(selected_slots) >= hours_needed_int:
+            logger.debug(f"Task {task_id}: trovati {len(selected_slots)} slot distribuiti su {len(set(s.date for s in selected_slots))} giorni")
+            return selected_slots[:hours_needed_int]
+
+        return []
+
+    def _debug_failed_task(self, user_id: int, hours_needed_int: int, task_id: int):
+        """Debug dettagliato per task falliti"""
+
+        if user_id not in self.available_blocks:
+            logger.warning(f"Task {task_id} FALLITO: User {user_id} non ha blocchi disponibili")
+            return
+
+        # Calcola statistiche disponibilità
+        total_blocks = len(self.available_blocks[user_id])
+        total_hours_available = sum(block.duration_hours for block in self.available_blocks[user_id])
+
+        # Calcola ore occupate
+        total_occupied_hours = sum(len(hours) for hours in self.occupied_slots[user_id].values())
+
+        # Calcola ore libere teoriche
+        free_hours_theoretical = total_hours_available - total_occupied_hours
+
+        logger.warning(f"Task {task_id} ({hours_needed_int}h) FALLITO per user {user_id}:")
+        logger.warning(f"  - Blocchi disponibili: {total_blocks}")
+        logger.warning(f"  - Ore totali disponibili: {total_hours_available:.1f}")
+        logger.warning(f"  - Ore occupate: {total_occupied_hours}")
+        logger.warning(f"  - Ore libere teoriche: {free_hours_theoretical:.1f}")
+
+        if free_hours_theoretical >= hours_needed_int:
+            logger.warning(f"  - PROBLEMA: Ore sufficienti ma algoritmo non trova slot consecutivi!")
+            logger.warning(f"  - SUGGERIMENTO: Problema di frammentazione o gap nei calendar_slots")
 
     def _find_single_day_slots(self, user_id: int, hours_needed_int: int, task_id: int) -> List[ScheduledSlot]:
         """Trova slot consecutivi all'interno di singoli giorni con algoritmo migliorato"""
