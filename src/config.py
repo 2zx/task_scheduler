@@ -46,7 +46,7 @@ SCHEDULER_CONFIG = {
     # Limite massimo orizzonte temporale in giorni (default: 10 anni = 3650 giorni)
     # Questo parametro controlla il limite massimo di giorni che il sistema
     # può considerare per la pianificazione prima di arrendersi
-    "max_horizon_days": int(os.getenv("MAX_HORIZON_DAYS", "3650")),  # 10 anni come default
+    "max_horizon_days": int(os.getenv("MAX_HORIZON_DAYS", "36500")),  # 10 anni come default
 }
 
 # Configurazione task
