@@ -115,13 +115,36 @@ class GreedySchedulingModel:
     def _sort_tasks_optimally(self):
         """Ordina i task per massimizzare l'efficacia dell'algoritmo greedy"""
 
-        # Ordinamento multi-criterio per ottimizzare greedy
-        sort_criteria = ['priority_score', 'remaining_hours', 'user_id', 'id']
-        sort_ascending = [True, False, True, True]  # Priorità alta, ore alte, user raggruppati
+        # Gestione sicura dei nuovi parametri di gerarchia (backward compatibility)
+        if 'hierarchy_level' not in self.tasks_df.columns:
+            self.tasks_df['hierarchy_level'] = 0
+        if 'is_leaf_task' not in self.tasks_df.columns:
+            self.tasks_df['is_leaf_task'] = True
+        if 'parent_id' not in self.tasks_df.columns:
+            self.tasks_df['parent_id'] = None
+
+        # Ordinamento multi-criterio per ottimizzare greedy con gerarchia
+        # 1. priority_score (DESC) - priorità principale
+        # 2. hierarchy_level (ASC) - figli prima dei padri (0=foglia, 1=padre di foglia, etc.)
+        # 3. is_leaf_task (DESC) - task foglia prima di quelli con figli
+        # 4. remaining_hours (DESC) - task lunghi prima per ottimizzare allocazione
+        # 5. user_id (ASC) - raggruppa per utente per efficienza
+        # 6. id (ASC) - determinismo
+
+        sort_criteria = ['priority_score', 'hierarchy_level', 'is_leaf_task', 'remaining_hours', 'user_id', 'id']
+        sort_ascending = [False, True, False, False, True, True]
 
         self.tasks_df = self.tasks_df.sort_values(sort_criteria, ascending=sort_ascending)
 
-        logger.info(f"Task ordinati per greedy: priorità {self.tasks_df['priority_score'].min():.1f}-{self.tasks_df['priority_score'].max():.1f}")
+        # Logging diagnostico
+        priority_range = f"{self.tasks_df['priority_score'].min():.1f}-{self.tasks_df['priority_score'].max():.1f}"
+        hierarchy_range = f"{self.tasks_df['hierarchy_level'].min()}-{self.tasks_df['hierarchy_level'].max()}"
+        leaf_count = self.tasks_df['is_leaf_task'].sum()
+
+        logger.info(f"Task ordinati per greedy con gerarchia:")
+        logger.info(f"  - Priorità: {priority_range}")
+        logger.info(f"  - Livelli gerarchia: {hierarchy_range}")
+        logger.info(f"  - Task foglia: {leaf_count}/{len(self.tasks_df)}")
 
     def _calculate_optimal_horizon(self):
         """Calcola orizzonte ottimale basato sul carico di lavoro per risorsa"""
