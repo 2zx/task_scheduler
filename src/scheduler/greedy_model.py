@@ -124,7 +124,7 @@ class GreedySchedulingModel:
             self.tasks_df['parent_id'] = None
 
         # Ordinamento multi-criterio per ottimizzare greedy con gerarchia
-        # 1. priority_score (DESC) - priorità principale
+        # 1. priority_score (ASC) - priorità principale
         # 2. hierarchy_level (ASC) - figli prima dei padri (0=foglia, 1=padre di foglia, etc.)
         # 3. is_leaf_task (DESC) - task foglia prima di quelli con figli
         # 4. remaining_hours (DESC) - task lunghi prima per ottimizzare allocazione
@@ -132,7 +132,7 @@ class GreedySchedulingModel:
         # 6. id (ASC) - determinismo
 
         sort_criteria = ['priority_score', 'hierarchy_level', 'is_leaf_task', 'remaining_hours', 'user_id', 'id']
-        sort_ascending = [False, True, False, False, True, True]
+        sort_ascending = [True, True, False, False, True, True]
 
         self.tasks_df = self.tasks_df.sort_values(sort_criteria, ascending=sort_ascending)
 
