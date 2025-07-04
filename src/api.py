@@ -124,6 +124,7 @@ class ScheduleResource(Resource):
         leaves_data = data.get("leaves", [])
         initial_horizon_days = data.get("initial_horizon_days", 28)
         horizon_extension_factor = data.get("horizon_extension_factor", 1.25)
+        date_start = data.get("date_start", None)
 
         # Supporto per backward compatibility con task_ids
         task_ids = data.get("task_ids", None)
@@ -156,6 +157,16 @@ class ScheduleResource(Resource):
                         "message": f"Campo obbligatorio '{field}' mancante nel task {task.get('id', 'sconosciuto')}"
                     }, 400
 
+        # Valida date_start se fornito
+        if date_start:
+            try:
+                datetime.fromisoformat(date_start.replace('Z', '+00:00'))
+            except ValueError:
+                return {
+                    "status": "error",
+                    "message": "Formato date_start non valido. Utilizzare formato ISO."
+                }, 400
+
         # Aggiorna lo stato
         scheduler_status["status"] = "running"
         scheduler_status["start_time"] = datetime.now().isoformat()
@@ -167,7 +178,8 @@ class ScheduleResource(Resource):
         import threading
         thread = threading.Thread(
             target=self._run_scheduler,
-            args=(tasks_data, calendar_slots_data, leaves_data, initial_horizon_days, horizon_extension_factor)
+            args=(tasks_data, calendar_slots_data, leaves_data,
+                  initial_horizon_days, horizon_extension_factor, date_start)
         )
         thread.daemon = True
         thread.start()
@@ -179,10 +191,11 @@ class ScheduleResource(Resource):
             "calendar_slots_count": len(calendar_slots_data),
             "leaves_count": len(leaves_data),
             "initial_horizon_days": initial_horizon_days,
-            "horizon_extension_factor": horizon_extension_factor
+            "horizon_extension_factor": horizon_extension_factor,
+            "date_start": date_start
         }, 202  # Accepted
 
-    def _run_scheduler(self, tasks_data, calendar_slots_data, leaves_data, initial_horizon_days=28, horizon_extension_factor=1.25):
+    def _run_scheduler(self, tasks_data, calendar_slots_data, leaves_data, initial_horizon_days=28, horizon_extension_factor=1.25, date_start=None):
         """
         Esegue il processo di pianificazione in background utilizzando i dati forniti direttamente
         """
@@ -190,7 +203,8 @@ class ScheduleResource(Resource):
         logger.info(f"Avvio pianificazione API con {len(tasks_data)} tasks, "
                    f"{len(calendar_slots_data)} calendar slots, {len(leaves_data)} leaves, "
                    f"initial_horizon_days={initial_horizon_days}, "
-                   f"horizon_extension_factor={horizon_extension_factor}")
+                   f"horizon_extension_factor={horizon_extension_factor}, "
+                   f"date_start={date_start}")
 
         try:
             # Converti i dati JSON in DataFrame pandas
