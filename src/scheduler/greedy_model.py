@@ -2,7 +2,7 @@ import logging
 import pandas as pd
 import math
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List
 from dataclasses import dataclass
 
 from ..config import SCHEDULER_CONFIG
@@ -360,7 +360,7 @@ class GreedySchedulingModel:
         return schedule
 
     def _find_consecutive_slots(self, user_id: int, hours_needed: float, task_id: int) -> List[ScheduledSlot]:
-        """Trova slot ottimali per un task con algoritmo flessibile"""
+        """Trova slot ottimali per un task con algoritmo migliorato per evitare sovrapposizioni"""
 
         if user_id not in self.available_blocks:
             logger.warning(f"Task {task_id}: User {user_id} non ha blocchi disponibili")
@@ -368,29 +368,33 @@ class GreedySchedulingModel:
 
         hours_needed_int = int(math.ceil(hours_needed))
 
-        # Strategia multi-livello:
-        # 1. Prova algoritmo consecutivo tradizionale
-        # 2. Se fallisce, prova algoritmo flessibile (con gap)
-        # 3. Se fallisce, prova distribuzione multi-giorno
+        # Strategia migliorata con priorità alla sequenzialità:
+        # 1. Algoritmo consecutivo rigoroso (single-day)
+        # 2. Algoritmo consecutivo multi-giorno
+        # 3. Algoritmo flessibile LIMITATO (solo se necessario)
+        # 4. Distribuzione multi-settimana (ultima risorsa)
 
-        # Livello 1: Algoritmo consecutivo tradizionale
-        if hours_needed_int > 40:
-            slots = self._find_multi_day_slots(user_id, hours_needed_int, task_id)
-        else:
-            slots = self._find_single_day_slots(user_id, hours_needed_int, task_id)
-
+        # Livello 1: Algoritmo consecutivo rigoroso per singolo giorno
+        slots = self._find_single_day_slots(user_id, hours_needed_int, task_id)
         if slots:
-            logger.debug(f"Task {task_id}: Trovato con algoritmo consecutivo")
+            logger.debug(f"Task {task_id}: Trovato con algoritmo consecutivo single-day")
             return slots
 
-        # Livello 2: Algoritmo flessibile (permette gap)
-        slots = self._find_flexible_slots(user_id, hours_needed_int, task_id)
+        # Livello 2: Algoritmo consecutivo multi-giorno
+        slots = self._find_multi_day_slots(user_id, hours_needed_int, task_id)
         if slots:
-            logger.debug(f"Task {task_id}: Trovato con algoritmo flessibile")
+            logger.debug(f"Task {task_id}: Trovato con algoritmo consecutivo multi-day")
             return slots
 
-        # Livello 3: Distribuzione multi-settimana per task lunghi
+        # Livello 3: Algoritmo flessibile LIMITATO (solo per task > 8 ore)
         if hours_needed_int > 8:
+            slots = self._find_flexible_slots_improved(user_id, hours_needed_int, task_id)
+            if slots:
+                logger.debug(f"Task {task_id}: Trovato con algoritmo flessibile migliorato")
+                return slots
+
+        # Livello 4: Distribuzione multi-settimana (ultima risorsa per task molto lunghi)
+        if hours_needed_int > 16:
             slots = self._find_distributed_slots(user_id, hours_needed_int, task_id)
             if slots:
                 logger.debug(f"Task {task_id}: Trovato con algoritmo distribuito")
@@ -400,10 +404,149 @@ class GreedySchedulingModel:
         self._debug_failed_task(user_id, hours_needed_int, task_id)
         return []
 
-    def _find_flexible_slots(self, user_id: int, hours_needed_int: int, task_id: int) -> List[ScheduledSlot]:
-        """Algoritmo flessibile che permette gap tra slot (es. pausa pranzo)"""
+    def _find_flexible_slots_improved(self, user_id: int, hours_needed_int: int, task_id: int) -> List[ScheduledSlot]:
+        """Algoritmo flessibile migliorato che prioritizza la consecutività e evita sovrapposizioni"""
 
-        logger.debug(f"Ricerca flessibile per task {task_id}: {hours_needed_int} ore")
+        logger.debug(f"Ricerca flessibile migliorata per task {task_id}: {hours_needed_int} ore")
+
+        # Strategia migliorata:
+        # 1. Cerca prima blocchi consecutivi per giorno
+        # 2. Se non trova, cerca blocchi con gap minimi
+        # 3. Limita la frammentazione massima
+
+        # Raggruppa blocchi per giorno
+        blocks_by_date = {}
+        for block in self.available_blocks[user_id]:
+            date_str = block.start_datetime.strftime('%Y-%m-%d')
+            if date_str not in blocks_by_date:
+                blocks_by_date[date_str] = []
+            blocks_by_date[date_str].append(block)
+
+        # Ordina le date cronologicamente
+        sorted_dates = sorted(blocks_by_date.keys())
+
+        # Prova prima con blocchi consecutivi per giorno
+        for date_str in sorted_dates:
+            day_slots = self._find_best_day_slots(user_id, date_str, hours_needed_int, task_id)
+            if len(day_slots) >= hours_needed_int:
+                logger.debug(f"Task {task_id}: trovati {len(day_slots)} slot consecutivi in {date_str}")
+                return day_slots[:hours_needed_int]
+
+        # Se non trova slot consecutivi in un singolo giorno, prova multi-giorno con gap limitati
+        selected_slots = []
+        max_gap_hours = 2  # Massimo 2 ore di gap permesse per giorno
+
+        for date_str in sorted_dates:
+            if len(selected_slots) >= hours_needed_int:
+                break
+
+            day_slots = self._find_flexible_day_slots(user_id, date_str, max_gap_hours, task_id)
+
+            # Prendi solo quello che serve
+            remaining_needed = hours_needed_int - len(selected_slots)
+            selected_slots.extend(day_slots[:remaining_needed])
+
+        if len(selected_slots) >= hours_needed_int:
+            logger.debug(f"Task {task_id}: trovati {len(selected_slots)} slot flessibili su {len(set(s.date for s in selected_slots))} giorni")
+            return selected_slots[:hours_needed_int]
+
+        return []
+
+    def _find_best_day_slots(self, user_id: int, date_str: str, hours_needed: int, task_id: int) -> List[ScheduledSlot]:
+        """Trova i migliori slot consecutivi in un singolo giorno"""
+
+        occupied_hours = self.occupied_slots[user_id].get(date_str, [])
+        day_blocks = [b for b in self.available_blocks[user_id]
+                     if b.start_datetime.strftime('%Y-%m-%d') == date_str]
+
+        if not day_blocks:
+            return []
+
+        # Ordina blocchi per ora di inizio
+        day_blocks = sorted(day_blocks, key=lambda b: b.start_datetime.hour)
+
+        best_consecutive = []
+
+        for block in day_blocks:
+            start_hour = block.start_datetime.hour
+            end_hour = block.end_datetime.hour
+
+            consecutive_slots = []
+
+            for hour in range(start_hour, end_hour):
+                if hour not in occupied_hours:
+                    slot = ScheduledSlot(
+                        task_id=task_id,
+                        user_id=user_id,
+                        date=date_str,
+                        hour=hour
+                    )
+                    consecutive_slots.append(slot)
+                else:
+                    # Se abbiamo trovato un blocco consecutivo migliore, salvalo
+                    if len(consecutive_slots) > len(best_consecutive):
+                        best_consecutive = consecutive_slots.copy()
+                    consecutive_slots = []
+
+            # Controlla l'ultimo blocco consecutivo
+            if len(consecutive_slots) > len(best_consecutive):
+                best_consecutive = consecutive_slots
+
+        return best_consecutive
+
+    def _find_flexible_day_slots(self, user_id: int, date_str: str, max_gap_hours: int, task_id: int) -> List[ScheduledSlot]:
+        """Trova slot in un giorno permettendo gap limitati"""
+
+        occupied_hours = self.occupied_slots[user_id].get(date_str, [])
+        day_blocks = [b for b in self.available_blocks[user_id]
+                     if b.start_datetime.strftime('%Y-%m-%d') == date_str]
+
+        if not day_blocks:
+            return []
+
+        # Raccogli tutti gli slot liberi del giorno
+        free_slots = []
+        for block in day_blocks:
+            start_hour = block.start_datetime.hour
+            end_hour = block.end_datetime.hour
+
+            for hour in range(start_hour, end_hour):
+                if hour not in occupied_hours:
+                    slot = ScheduledSlot(
+                        task_id=task_id,
+                        user_id=user_id,
+                        date=date_str,
+                        hour=hour
+                    )
+                    free_slots.append(slot)
+
+        # Ordina per ora
+        free_slots = sorted(free_slots, key=lambda s: s.hour)
+
+        # Verifica che i gap non siano troppo grandi
+        if len(free_slots) <= 1:
+            return free_slots
+
+        # Controlla gap tra slot consecutivi
+        valid_slots = [free_slots[0]]  # Il primo slot è sempre valido
+
+        for i in range(1, len(free_slots)):
+            current_hour = free_slots[i].hour
+            prev_hour = free_slots[i-1].hour
+            gap = current_hour - prev_hour - 1
+
+            if gap <= max_gap_hours:
+                valid_slots.append(free_slots[i])
+            else:
+                # Gap troppo grande, interrompi la sequenza
+                break
+
+        return valid_slots
+
+    def _find_flexible_slots(self, user_id: int, hours_needed_int: int, task_id: int) -> List[ScheduledSlot]:
+        """Algoritmo flessibile legacy (mantenuto per compatibilità)"""
+
+        logger.debug(f"Ricerca flessibile legacy per task {task_id}: {hours_needed_int} ore")
 
         # Raccogli tutti gli slot liberi disponibili
         all_free_slots = []
@@ -453,7 +596,7 @@ class GreedySchedulingModel:
                     break
 
             if len(selected_slots) >= hours_needed_int:
-                logger.debug(f"Task {task_id}: trovati {len(selected_slots)} slot flessibili")
+                logger.debug(f"Task {task_id}: trovati {len(selected_slots)} slot flessibili legacy")
                 return selected_slots[:hours_needed_int]
 
         return []
@@ -676,8 +819,45 @@ class GreedySchedulingModel:
                     'hour': int(slot.hour)  # Assicura che anche hour sia int standard
                 })
 
+        # Validazione finale: verifica che non ci siano sovrapposizioni
+        overlaps_found = self._validate_no_overlaps(schedule)
+        if overlaps_found:
+            logger.error(f"ATTENZIONE: Trovate {overlaps_found} sovrapposizioni nella soluzione!")
+            self.stats['overlaps_detected'] = overlaps_found
+        else:
+            logger.info("Validazione completata: nessuna sovrapposizione rilevata")
+            self.stats['overlaps_detected'] = 0
+
         self.solution = solution
         logger.info(f"Soluzione greedy creata: {len(solution['tasks'])} task pianificati")
+
+    def _validate_no_overlaps(self, schedule: Dict[int, List[ScheduledSlot]]) -> int:
+        """Valida che non ci siano sovrapposizioni nella soluzione finale"""
+
+        # Raggruppa tutti gli slot per utente e slot temporale
+        user_slots = {}
+        overlaps_count = 0
+
+        for task_id, slots in schedule.items():
+            for slot in slots:
+                user_id = slot.user_id
+                time_key = f"{slot.date}_{slot.hour}"
+
+                if user_id not in user_slots:
+                    user_slots[user_id] = {}
+
+                if time_key in user_slots[user_id]:
+                    # Sovrapposizione trovata!
+                    existing_task = user_slots[user_id][time_key]
+                    logger.error(
+                        f"SOVRAPPOSIZIONE: User {user_id}, {slot.date} ore {slot.hour} - "
+                        f"Task {existing_task} vs Task {task_id}"
+                    )
+                    overlaps_count += 1
+                else:
+                    user_slots[user_id][time_key] = task_id
+
+        return overlaps_count
 
     def get_solver_statistics(self):
         """Restituisce statistiche dell'algoritmo greedy"""
