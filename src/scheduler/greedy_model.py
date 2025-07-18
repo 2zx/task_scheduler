@@ -228,8 +228,8 @@ class GreedySchedulingModel:
                         )
                         self.available_blocks[user_id].append(block)
 
-                # Inizializza slot occupati per questo giorno
-                self.occupied_slots[user_id][day.strftime('%Y-%m-%d')] = []
+                # Inizializza slot occupati per questo giorno (usa set per evitare duplicati)
+                self.occupied_slots[user_id][day.strftime('%Y-%m-%d')] = set()
 
     def _apply_leaves_to_blocks(self):
         """Rimuove blocchi che si sovrappongono con assenze"""
@@ -455,7 +455,7 @@ class GreedySchedulingModel:
     def _find_best_day_slots(self, user_id: int, date_str: str, hours_needed: int, task_id: int) -> List[ScheduledSlot]:
         """Trova i migliori slot consecutivi in un singolo giorno"""
 
-        occupied_hours = self.occupied_slots[user_id].get(date_str, [])
+        occupied_hours = self.occupied_slots[user_id].get(date_str, set())
         day_blocks = [b for b in self.available_blocks[user_id]
                      if b.start_datetime.strftime('%Y-%m-%d') == date_str]
 
@@ -497,7 +497,7 @@ class GreedySchedulingModel:
     def _find_flexible_day_slots(self, user_id: int, date_str: str, max_gap_hours: int, task_id: int) -> List[ScheduledSlot]:
         """Trova slot in un giorno permettendo gap limitati"""
 
-        occupied_hours = self.occupied_slots[user_id].get(date_str, [])
+        occupied_hours = self.occupied_slots[user_id].get(date_str, set())
         day_blocks = [b for b in self.available_blocks[user_id]
                      if b.start_datetime.strftime('%Y-%m-%d') == date_str]
 
@@ -556,7 +556,7 @@ class GreedySchedulingModel:
 
         for block in blocks:
             date_str = block.start_datetime.strftime('%Y-%m-%d')
-            occupied_hours = self.occupied_slots[user_id].get(date_str, [])
+            occupied_hours = self.occupied_slots[user_id].get(date_str, set())
 
             start_hour = block.start_datetime.hour
             end_hour = block.end_datetime.hour
@@ -623,7 +623,7 @@ class GreedySchedulingModel:
             if week_key not in slots_by_week:
                 slots_by_week[week_key] = []
 
-            occupied_hours = self.occupied_slots[user_id].get(date_str, [])
+            occupied_hours = self.occupied_slots[user_id].get(date_str, set())
 
             start_hour = block.start_datetime.hour
             end_hour = block.end_datetime.hour
@@ -697,7 +697,7 @@ class GreedySchedulingModel:
 
             # Verifica disponibilità nel blocco
             date_str = block.start_datetime.strftime('%Y-%m-%d')
-            occupied_hours = self.occupied_slots[user_id].get(date_str, [])
+            occupied_hours = self.occupied_slots[user_id].get(date_str, set())
 
             # Trova slot consecutivi liberi nel blocco
             start_hour = block.start_datetime.hour
@@ -757,7 +757,7 @@ class GreedySchedulingModel:
             if len(consecutive_slots) >= hours_needed_int:
                 break
 
-            occupied_hours = self.occupied_slots[user_id].get(date_str, [])
+            occupied_hours = self.occupied_slots[user_id].get(date_str, set())
             day_blocks = sorted(blocks_by_date[date_str], key=lambda b: b.start_datetime.hour)
 
             # Per ogni blocco del giorno
@@ -791,12 +791,18 @@ class GreedySchedulingModel:
             return []
 
     def _mark_slots_occupied(self, user_id: int, slots: List[ScheduledSlot]):
-        """Marca gli slot come occupati"""
+        """Marca gli slot come occupati usando set per evitare duplicati"""
 
         for slot in slots:
             if slot.date not in self.occupied_slots[user_id]:
-                self.occupied_slots[user_id][slot.date] = []
-            self.occupied_slots[user_id][slot.date].append(slot.hour)
+                self.occupied_slots[user_id][slot.date] = set()
+            self.occupied_slots[user_id][slot.date].add(slot.hour)
+
+        # Log dettagliato per debugging
+        if slots:
+            date_str = slots[0].date
+            occupied_count = len(self.occupied_slots[user_id][date_str])
+            logger.debug(f"Task {slots[0].task_id}: marcati {len(slots)} slot, totale occupati in {date_str}: {occupied_count}")
 
     def _convert_to_solution_format(self, schedule: Dict[int, List[ScheduledSlot]]):
         """Converte il risultato greedy nel formato compatibile"""
