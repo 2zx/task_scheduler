@@ -27,11 +27,15 @@ env/
 .env
 
 # Log e output
-logs/
+logs/*
+!logs/.gitkeep
 *.log
 # Ignore all files in data directory but preserve the directory structure
 data/*
 !data/.gitkeep
+!reports/.gitkeep
+reports/charts/*
+!reports/charts/.gitkeep
 
 # File di configurazione locali
 .env

@@ -159,6 +159,50 @@ class SchedulingModel:
             logger.error(f"Errore in fallback OrTools: {str(e)}")
             return False
 
+    def get_solution_dataframe(self):
+        """
+        Converte la soluzione in un DataFrame pandas per una facile manipolazione.
+
+        Returns:
+            DataFrame: La soluzione in formato DataFrame
+        """
+        if not self.solution:
+            logger.warning("Nessuna soluzione disponibile")
+            return None
+
+        # Prepara i dati per il DataFrame
+        rows = []
+        for task_id, slots in self.solution['tasks'].items():
+            # Converti task_id a int se è una stringa
+            task_id_int = int(task_id) if isinstance(task_id, str) else task_id
+
+            # Trova le informazioni del task
+            task_info = self.tasks_df[self.tasks_df['id'] == task_id_int]
+            if task_info.empty:
+                logger.warning(f"Task {task_id_int} non trovato nel DataFrame dei task")
+                continue
+
+            task_name = task_info['name'].iloc[0]
+            user_id = task_info['user_id'].iloc[0]
+
+            for slot in slots:
+                rows.append({
+                    'task_id': task_id_int,
+                    'task_name': task_name,
+                    'user_id': user_id,
+                    'date': slot['date'],
+                    'hour': slot['hour']
+                })
+
+        # Crea il DataFrame
+        if rows:
+            df = pd.DataFrame(rows)
+            # Ordina per data, ora e task
+            df = df.sort_values(['date', 'hour', 'task_id'])
+            return df
+        else:
+            return pd.DataFrame(columns=['task_id', 'task_name', 'user_id', 'date', 'hour'])
+
     def get_solver_statistics(self):
         """Restituisce statistiche del solver con informazioni sull'algoritmo utilizzato"""
 

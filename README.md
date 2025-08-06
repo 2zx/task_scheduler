@@ -1,103 +1,90 @@
-# TASK Scheduler con OrTools
+# Task Scheduler Ibrido con OrTools
 
-Un sistema di pianificazione delle attività ottimizzato, progettato per l'allocazione intelligente delle risorse e la pianificazione automatica delle attività utilizzando Google OrTools CP-SAT solver.
+Un sistema di pianificazione delle attività ottimizzato che utilizza un approccio ibrido (Greedy + OrTools) per l'allocazione intelligente delle risorse e la pianificazione automatica delle attività. Progettato per integrarsi con sistemi esterni tramite API REST.
 
-## 🚀 Caratteristiche
+## 🚀 Caratteristiche Principali
 
-- **Pianificazione automatica** delle attività basata su vincoli complessi
-- **Integrazione nativa con Odoo 10** per gestione lavanderie industriali
-- **API REST** per invocazione da sistemi esterni (incluso Odoo 12)
-- **Solver OrTools CP-SAT** per ottimizzazione ad alte prestazioni
-- **Supporto PostgreSQL** con connessioni sicure
-- **Tunnel SSH** per connessioni a database remoti
-- **Gestione calendari e assenze** del personale
-- **Containerizzazione Docker** completa
-- **Shell interattiva** per controllo e monitoraggio
-- **Visualizzazione grafica** con diagrammi di Gantt, timeline interattive e report HTML
+- **Algoritmo Ibrido**: Combina algoritmo Greedy (per performance) e OrTools CP-SAT (per ottimizzazione avanzata)
+- **API REST Completa** per integrazione con sistemi esterni (Odoo, ERP, etc.)
+- **Pianificazione Automatica** basata su vincoli complessi e calendari di lavoro
+- **Gestione Assenze** e calendari personalizzati per ogni risorsa
+- **Estensione Automatica dell'Orizzonte** temporale per garantire soluzioni fattibili
+- **Visualizzazioni Grafiche** con diagrammi di Gantt, timeline interattive e report HTML
+- **Containerizzazione Docker** completa per deployment semplificato
+- **Shell Interattiva** per controllo e monitoraggio in tempo reale
 
 ## 📋 Requisiti
 
 - Docker e Docker Compose
-- Python 3.11+
-- Google OrTools (installato automaticamente)
-- Accesso a database Odoo 10
+- Python 3.11+ (se eseguito senza Docker)
+- Accesso a database PostgreSQL (per integrazione con Odoo o altri sistemi)
 
 ## 🏗️ Architettura del Sistema
 
-```mermaid
-graph TB
-    subgraph "Odoo Database"
-        A[project_task]
-        B[resource_calendar]
-        C[hr_leave]
-        D[hr_employee]
-    end
-
-    subgraph "Task Scheduler Container"
-        E[Data Fetcher] --> F[OrTools CP-SAT Model]
-        F --> G[Solution Processor]
-        G --> H[JSON Output]
-
-        subgraph "OrTools Components"
-            F1[Variables Creation]
-            F2[Constraints Definition]
-            F3[Objective Function]
-            F4[CP-SAT Solver]
-            F1 --> F2 --> F3 --> F4
-        end
-    end
-
-    subgraph "Infrastructure"
-        I[Docker Container]
-        J[SSH Tunnel]
-        K[PostgreSQL Connection]
-    end
-
-    A --> E
-    B --> E
-    C --> E
-    D --> E
-
-    I --> F
-    J --> K
-    K --> A
+```
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│   Sistema       │    │   Task Scheduler │    │   Risultati     │
+│   Esterno       │───▶│   API REST       │───▶│   JSON/HTML     │
+│   (Odoo/ERP)    │    │                  │    │                 │
+└─────────────────┘    └──────────────────┘    └─────────────────┘
+                                │
+                                ▼
+                       ┌──────────────────┐
+                       │  Algoritmo       │
+                       │  Ibrido          │
+                       │                  │
+                       │ ┌──────────────┐ │
+                       │ │   Greedy     │ │◀── Per molti task
+                       │ │  (Performance)│ │    (>50 task)
+                       │ └──────────────┘ │
+                       │                  │
+                       │ ┌──────────────┐ │
+                       │ │   OrTools    │ │◀── Per ottimizzazione
+                       │ │  (CP-SAT)    │ │    complessa
+                       │ └──────────────┘ │
+                       └──────────────────┘
 ```
 
 ## 🔧 Struttura del Progetto
 
 ```
-task-scheduler/
-├── src/                        # Codice sorgente principale
+task_scheduler/
+├── src/                           # Codice sorgente principale
 │   ├── __init__.py
-│   ├── run.py                  # Punto di ingresso e shell interattiva
-│   ├── config.py               # Configurazioni OrTools e database
-│   ├── db.py                   # Gestione connessioni database
-│   ├── fetch.py                # Recupero dati da Odoo
-│   └── scheduler/              # Logica di scheduling
+│   ├── run.py                     # Shell interattiva e punto di ingresso
+│   ├── run_api.py                 # Server API REST
+│   ├── api.py                     # Endpoint e logica API
+│   ├── config.py                  # Configurazioni sistema
+│   ├── db.py                      # Gestione connessioni database
+│   ├── fetch.py                   # Recupero dati da database esterni
+│   └── scheduler/                 # Logica di scheduling
 │       ├── __init__.py
-│       ├── model.py            # Modello OrTools CP-SAT
-│       └── utils.py            # Funzioni di utilità
-├── tests/                      # Test unitari
+│       ├── model.py               # Modello ibrido principale
+│       ├── greedy_model.py        # Algoritmo Greedy
+│       ├── interval_model.py      # Modello OrTools CP-SAT
+│       ├── utils.py               # Funzioni di utilità
+│       └── visualization.py       # Generazione grafici
+├── tests/                         # Test unitari
 │   └── test_schedule_model.py
-├── logs/                       # Directory per i log
-├── data/                       # Directory per output JSON
-├── _tmp/                       # File temporanei e di lavoro
-├── Dockerfile                  # Configurazione container
-├── docker-compose.yml          # Orchestrazione servizi
-├── requirements.txt            # Dipendenze Python
-├── setup.py                    # Setup del pacchetto
-├── .env.example               # Template configurazione
+├── logs/                          # Directory per i log
+├── data/                          # Directory per output JSON/HTML
+├── _tmp/                          # File temporanei e di lavoro
+├── Dockerfile                     # Configurazione container
+├── docker-compose.yml             # Orchestrazione servizi
+├── requirements.txt               # Dipendenze Python
+├── setup.py                       # Setup del pacchetto
+├── .env.example                   # Template configurazione
 ├── .gitignore
 └── README.md
 ```
 
-## 🛠️ Installazione
+## 🛠️ Installazione e Configurazione
 
 ### 1. Clone del Repository
 
 ```bash
-git clone https://github.com/yourusername/task-scheduler.git
-cd task-scheduler
+git clone https://github.com/2zx/task_scheduler.git
+cd task_scheduler
 ```
 
 ### 2. Configurazione Ambiente
@@ -109,397 +96,752 @@ cp .env.example .env
 Modifica il file `.env` con le tue configurazioni:
 
 ```env
-# Database Odoo
-DB_HOST=your-odoo-host
+# Database Configuration (per integrazione con sistemi esterni)
+DB_HOST=your-database-host
 DB_PORT=5432
-DB_NAME=your_odoo_db
+DB_NAME=your_database_name
 DB_USER=your_user
 DB_PASSWORD=your_password
 
-# OrTools Parameters
-ORTOOLS_TIME_LIMIT=3600
+# SSH Tunnel (opzionale per database remoti)
+SSH_ENABLED=false
+SSH_HOST=
+SSH_USERNAME=
+SSH_KEY_PATH=/app/ssh_key
+
+# OrTools Configuration
+ORTOOLS_TIME_LIMIT=30
 ORTOOLS_WORKERS=4
 ORTOOLS_LOG_PROGRESS=false
-ORTOOLS_OUTPUT_FILE=/app/data/schedule.json
 
-# Task Configuration
-TASK_IDS=1,2,3,4,5
-TASK_LIMIT=20
+# Scheduler Hybrid Configuration
+GREEDY_THRESHOLD_TASKS=50          # Soglia per usare Greedy
+GREEDY_THRESHOLD_HOURS=1000        # Soglia ore totali per Greedy
+HYBRID_MODE=true                   # Abilita modalità ibrida
+MAX_HORIZON_DAYS=1825              # Orizzonte massimo (5 anni)
+
+# Logging
+LOG_LEVEL=INFO
 ```
 
-### 3. Avvio Container
+### 3. Avvio con Docker
 
 ```bash
-docker-compose up -d
+# Avvia il servizio API
+docker-compose up -d task-scheduler-api
+
+# Verifica che il servizio sia attivo
+curl http://localhost:5050/api/v1/schedule/status
 ```
 
 ## 🎯 Utilizzo
 
-### Shell Interattiva
+### API REST
+
+Il sistema espone un'API REST completa per l'integrazione con sistemi esterni:
+
+#### 1. Avvia una Pianificazione
 
 ```bash
-docker-compose exec task-scheduler python -m src.run
-```
+POST http://localhost:5050/api/v1/schedule
+Content-Type: application/json
 
-Comandi disponibili:
-- `run [task_ids]` - Esegue la pianificazione
-- `status` - Mostra stato del sistema
-- `list` - Elenca task pendenti
-- `exit` - Esce dall'applicazione
-
-### Esecuzione Diretta
-
-```bash
-# Pianifica task specifici
-docker-compose exec task-scheduler python -m src.run
-
-# Visualizza log
-docker-compose logs -f task-scheduler
-```
-
-## 🔍 Modello di Ottimizzazione
-
-### Variabili di Decisione
-
-```python
-x[task_id, date, hour] = True  # Se task è schedulato in quella data/ora
-day[task_id, date] = True      # Se task usa quel giorno
-```
-
-### Vincoli Principali
-
-1. **Ore Pianificate**: Ogni task deve essere completato esattamente per le ore richieste
-2. **Disponibilità Risorse**: Una risorsa può fare solo un task per slot
-3. **Calendari di Lavoro**: Rispetto degli orari di lavoro
-4. **Gestione Assenze**: Esclusione giorni di ferie/malattia
-
-### Estensione Automatica dell'Orizzonte Temporale
-
-Il sistema garantisce sempre una soluzione fattibile attraverso:
-- Orizzonte temporale iniziale di 28 giorni (4 settimane)
-- Estensione automatica dell'orizzonte se non viene trovata una soluzione
-- Mantenimento rigoroso dei vincoli (nessun rilassamento)
-- Fattore di estensione configurabile (default: raddoppio dell'orizzonte)
-
-```python
-# Esempio di configurazione
-model = SchedulingModel(
-    tasks_df,
-    calendar_slots_df,
-    leaves_df,
-    initial_horizon_days=28,     # Orizzonte iniziale
-    horizon_extension_factor=2   # Fattore di estensione
-)
-```
-
-### Funzione Obiettivo
-
-Minimizza la dispersione temporale delle attività per favorire:
-- Concentrazione delle attività in giorni contigui
-- Riduzione dei tempi di setup
-- Ottimizzazione dell'utilizzo delle risorse
-
-## 📊 Integrazione Odoo
-
-### Tabelle Utilizzate
-
-```sql
--- Task da pianificare
-SELECT t.id, t.name, t.user_id, t.planned_hours
-FROM project_task t
-INNER JOIN project_task_type pt ON t.stage_id = pt.id
-WHERE t.planned_hours > 0 AND pt.closed = false;
-
--- Calendari di lavoro
-SELECT t.id as task_id, rca.dayofweek, rca.hour_from, rca.hour_to
-FROM project_task t
-JOIN hr_employee e ON e.id = t.employee_id
-JOIN resource_calendar rc ON rc.id = e.resource_calendar_id
-JOIN resource_calendar_attendance rca ON rca.calendar_id = rc.id;
-
--- Assenze del personale
-SELECT t.id as task_id, l.date_from, l.date_to
-FROM project_task t
-JOIN hr_employee e ON e.id = t.employee_id
-JOIN hr_leave l ON l.employee_id = e.id
-WHERE l.state = 'validate';
-```
-
-## 🐳 Configurazione Docker
-
-### Vantaggi della Migrazione a OrTools
-
-- **Dimensione ridotta**: Da ~2GB a ~500MB
-- **Build più veloce**: Eliminata compilazione SCIP
-- **Meno dipendenze**: Solo build-essential necessario
-- **Maggiore stabilità**: Meno punti di fallimento
-
-### Dockerfile Ottimizzato
-
-```dockerfile
-FROM python:3.11-slim
-
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
-
-# Dipendenze minime
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    && apt-get clean
-
-# Installazione OrTools via pip
-RUN pip install ortools>=9.8.3296
-```
-
-## 🔧 Configurazione Avanzata
-
-### Parametri OrTools
-
-```env
-# Limite tempo di risoluzione (secondi)
-ORTOOLS_TIME_LIMIT=3600
-
-# Numero di worker paralleli
-ORTOOLS_WORKERS=4
-
-# Log dettagliato del progresso
-ORTOOLS_LOG_PROGRESS=true
-
-# File di output
-ORTOOLS_OUTPUT_FILE=/app/data/schedule.json
-```
-
-### Parametri di Estensione dell'Orizzonte
-
-Questi parametri possono essere configurati nel codice:
-
-```python
-# In src/run.py
-model = SchedulingModel(
-    tasks_df,
-    calendar_slots_df,
-    leaves_df,
-    initial_horizon_days=28,     # Orizzonte iniziale in giorni
-    horizon_extension_factor=2   # Fattore di moltiplicazione per ogni estensione
-)
-```
-
-### Tunnel SSH per Database Remoti
-
-```env
-SSH_ENABLED=true
-SSH_HOST=remote.example.com
-SSH_PORT=22
-SSH_USERNAME=user
-SSH_KEY_PATH=/app/ssh_key
-```
-
-## 📊 Visualizzazione Grafica
-
-Il sistema genera automaticamente diversi tipi di grafici per visualizzare i risultati della pianificazione:
-
-### Tipi di Grafici Disponibili
-
-1. **📅 Diagramma di Gantt**
-   - Visualizzazione temporale delle attività
-   - Colori diversi per ogni task
-   - Informazioni su utenti e durata
-
-2. **⏱️ Timeline Interattiva**
-   - Grafico Plotly interattivo
-   - Zoom e pan per esplorare i dettagli
-   - Hover per informazioni aggiuntive
-
-3. **👥 Utilizzo Risorse**
-   - Ore programmate per utente per giorno
-   - Percentuale di utilizzo delle risorse
-   - Identificazione di sovraccarichi
-
-4. **📊 Distribuzione Task**
-   - Ore totali per task
-   - Giorni utilizzati per task
-   - Confronto ore pianificate vs programmate
-   - Distribuzione del carico per utente
-
-### Output Generati
-
-```bash
-/app/data/
-├── gantt_chart.png              # Diagramma di Gantt
-├── timeline_chart.html          # Timeline interattiva
-├── resource_utilization.png     # Grafici utilizzo risorse
-├── task_distribution.png        # Distribuzione task
-├── scheduling_report.html       # Report completo HTML
-└── schedule.json               # Dati JSON della soluzione
-```
-
-### Esempio di Utilizzo
-
-```python
-from src.scheduler.visualization import ScheduleVisualizer
-
-# Crea il visualizzatore
-visualizer = ScheduleVisualizer(solution_df, tasks_df)
-
-# Genera tutti i grafici
-charts = visualizer.generate_all_charts()
-
-# Crea report HTML completo
-report_path = visualizer.create_summary_report(charts)
-```
-
-### Report HTML
-
-Il sistema genera automaticamente un report HTML completo che include:
-- Statistiche generali della pianificazione
-- Tutti i grafici generati
-- Link alla timeline interattiva
-- Styling professionale per presentazioni
-
-## 📈 Performance e Monitoraggio
-
-### Statistiche Solver
-
-Il sistema fornisce metriche dettagliate:
-
-```json
 {
-  "status": "OPTIMAL",
-  "objective_value": 15,
-  "wall_time": 2.34,
-  "num_branches": 1247,
-  "num_conflicts": 89,
-  "num_booleans": 2856,
-  "num_constraints": 1432
+  "tasks": [
+    {
+      "id": 1,
+      "name": "Task Esempio",
+      "user_id": 10,
+      "remaining_hours": 8.0
+    }
+  ],
+  "calendar_slots": [
+    {
+      "task_id": 1,
+      "dayofweek": 0,
+      "hour_from": 9.0,
+      "hour_to": 17.0
+    }
+  ],
+  "leaves": [],
+  "initial_horizon_days": 28,
+  "horizon_extension_factor": 1.25
 }
 ```
 
-### Output della Pianificazione
+#### 2. Verifica lo Stato
+
+```bash
+GET http://localhost:5050/api/v1/schedule/status
+```
+
+#### 3. Recupera i Risultati
+
+```bash
+GET http://localhost:5050/api/v1/schedule/result
+```
+
+### Shell Interattiva
+
+Per controllo diretto e debugging:
+
+```bash
+# Accedi alla shell interattiva
+docker-compose exec task-scheduler-api python -m src.run
+
+# Comandi disponibili:
+scheduler> run          # Esegue pianificazione con dati da database
+scheduler> status       # Mostra stato del sistema
+scheduler> list         # Elenca task pendenti
+scheduler> exit         # Esce dall'applicazione
+```
+
+## 🧠 Algoritmo Ibrido
+
+### Strategia di Selezione
+
+Il sistema sceglie automaticamente l'algoritmo più appropriato:
+
+```python
+# Criteri per algoritmo Greedy (performance):
+- Numero task > 50
+- Ore totali > 1000
+- Numero utenti > 10
+- Media ore per task > 100
+
+# Altrimenti usa OrTools (ottimizzazione)
+```
+
+### Algoritmo Greedy
+
+- **Vantaggi**: Velocità estrema, scalabilità lineare
+- **Uso**: Grandi volumi di task (>50), scenari di produzione
+- **Strategia**: Priorità + disponibilità temporale
+
+### Algoritmo OrTools CP-SAT
+
+- **Vantaggi**: Ottimizzazione matematica, soluzioni ottimali
+- **Uso**: Task complessi, vincoli articolati, piccoli volumi
+- **Strategia**: Constraint Programming con estensione automatica dell'orizzonte
+
+### Fallback Intelligente
+
+```python
+# Flusso ibrido:
+1. Greedy per task principali
+2. OrTools per task residui (se <20)
+3. Fallback completo a OrTools se Greedy fallisce
+```
+
+## 📊 Formato Dati
+
+### Input Task
+
+```json
+{
+  "id": 123,
+  "name": "Nome Task",
+  "user_id": 10,
+  "remaining_hours": 8.0,
+  "priority_score": 50.0  // Opzionale, default 50.0
+}
+```
+
+### Input Calendar Slots
+
+```json
+{
+  "task_id": 123,
+  "dayofweek": 0,        // 0=Lunedì, 6=Domenica
+  "hour_from": 9.0,
+  "hour_to": 17.0
+}
+```
+
+### Input Leaves (Assenze)
+
+```json
+{
+  "task_id": 123,
+  "date_from": "2025-06-10",
+  "date_to": "2025-06-12"
+}
+```
+
+### Output Pianificazione
 
 ```json
 {
   "tasks": {
     "123": [
       {"date": "2025-06-24", "hour": 9},
-      {"date": "2025-06-24", "hour": 10},
-      {"date": "2025-06-25", "hour": 14}
+      {"date": "2025-06-24", "hour": 10}
     ]
   },
   "objective_value": 15,
   "status": "OPTIMAL",
   "solve_time": 2.34,
-  "horizon_days": 56
+  "horizon_days": 28,
+  "algorithm_used": "greedy"
 }
 ```
 
-Il campo `horizon_days` indica l'orizzonte temporale finale utilizzato per trovare la soluzione. Se questo valore è maggiore dell'orizzonte iniziale (28 giorni), significa che il sistema ha dovuto estendere l'orizzonte per trovare una soluzione fattibile.
+## 📈 Visualizzazioni
 
-## 🧪 Testing
+Il sistema genera automaticamente:
+
+### Grafici Disponibili
+
+1. **📅 Diagramma di Gantt** (`gantt_chart.png`)
+   - Visualizzazione temporale delle attività
+   - Colori per task e utenti
+
+2. **⏱️ Timeline Interattiva** (`timeline_chart.html`)
+   - Grafico Plotly interattivo
+   - Zoom, pan, hover per dettagli
+
+3. **👥 Utilizzo Risorse** (`resource_utilization.png`)
+   - Ore per utente per giorno
+   - Identificazione sovraccarichi
+
+4. **📊 Distribuzione Task** (`task_distribution.png`)
+   - Statistiche ore e giorni per task
+   - Confronto pianificato vs programmato
+
+5. **📋 Report HTML Completo** (`scheduling_report.html`)
+   - Tutti i grafici in un unico report
+   - Statistiche e metriche dettagliate
+
+### Output Directory
+
+```
+/app/data/
+├── schedule.json              # Risultati JSON
+├── gantt_chart.png           # Diagramma di Gantt
+├── timeline_chart.html       # Timeline interattiva
+├── resource_utilization.png  # Utilizzo risorse
+├── task_distribution.png     # Distribuzione task
+└── scheduling_report.html    # Report completo
+```
+
+## ⚙️ Configurazione Avanzata
+
+### Parametri Algoritmo Ibrido
+
+```env
+# Soglie per selezione algoritmo
+GREEDY_THRESHOLD_TASKS=50          # Numero task per Greedy
+GREEDY_THRESHOLD_HOURS=1000        # Ore totali per Greedy
+GREEDY_THRESHOLD_USERS=10          # Numero utenti per Greedy
+GREEDY_THRESHOLD_AVG_HOURS=100     # Media ore/task per Greedy
+
+# Timeout OrTools
+ORTOOLS_TIMEOUT_SECONDS=30         # Timeout normale
+ORTOOLS_FALLBACK_TIMEOUT=60        # Timeout fallback
+
+# Modalità ibrida
+HYBRID_MODE=true                   # Abilita/disabilita ibrido
+```
+
+### Parametri Orizzonte Temporale
+
+```env
+# Orizzonte temporale massimo
+MAX_HORIZON_DAYS=1825              # 5 anni (default)
+
+# Estensione automatica (solo OrTools)
+# initial_horizon_days=28          # Configurabile via API
+# horizon_extension_factor=1.25    # Configurabile via API
+```
+
+### Parametri Performance
+
+```env
+# OrTools
+ORTOOLS_TIME_LIMIT=30              # Timeout per iterazione
+ORTOOLS_WORKERS=4                  # Worker paralleli
+
+# Logging
+LOG_LEVEL=INFO                     # DEBUG per dettagli
+ORTOOLS_LOG_PROGRESS=false         # Log progresso solver
+```
+
+## 🐳 Docker
+
+### Servizi Disponibili
+
+```yaml
+# docker-compose.yml
+services:
+  task-scheduler-api:
+    build: .
+    ports:
+      - "5050:5000"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    environment:
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=INFO
+```
+
+### Comandi Docker
 
 ```bash
-# Esegui tutti i test
-docker-compose exec task-scheduler pytest
+# Build e avvio
+docker-compose up -d
+
+# Log in tempo reale
+docker-compose logs -f task-scheduler-api
+
+# Shell interattiva
+docker-compose exec task-scheduler-api python -m src.run
+
+# Restart servizio
+docker-compose restart task-scheduler-api
+
+# Stop e cleanup
+docker-compose down
+```
+
+## 🧪 Testing e Benchmark
+
+### Test di Qualità del Prodotto
+
+Il sistema include una suite completa di test per verificare la qualità della pianificazione prodotta, indipendentemente dall'algoritmo utilizzato internamente.
+
+#### Comandi Rapidi
+
+```bash
+# Setup ambiente di test
+make setup
+
+# Test rapido (50 task)
+make quick-test
+
+# Test qualità completo (100 task)
+make test-quality
+
+# Benchmark performance M4
+make benchmark-m4
+
+# Genera report HTML completo
+make generate-report
+
+# Mostra tutti i comandi disponibili
+make help
+```
+
+#### Test Disponibili
+
+```bash
+# Test di qualità per scenari specifici
+make test-quality          # Scenario produzione (100 task)
+make test-performance       # Benchmark performance M4
+make test-priority         # Test rispetto priorità
+make test-stress           # Stress test (500 task)
+make test-all             # Tutti i test di qualità
+
+# Test unitari base
+make test-unit            # Test unitari originali
+
+# Generazione report
+make generate-report                # Report completo
+make generate-report-production     # Solo scenario produzione
+make generate-report-stress         # Solo stress test
+make demo                          # Demo con visualizzazioni
+```
+
+#### Test Manuali con Docker
+
+```bash
+# Test completi in container
+docker-compose exec task-scheduler-api pytest tests/test_scheduling_quality.py -v
 
 # Test con coverage
-docker-compose exec task-scheduler pytest --cov=src
+docker-compose exec task-scheduler-api pytest --cov=src
 
-# Test specifici
-docker-compose exec task-scheduler pytest tests/test_schedule_model.py
+# Genera report in container
+docker-compose exec task-scheduler-api python tests/quality_report_generator.py
+```
+
+### Metriche di Qualità
+
+#### Schedule Quality Score (SQS)
+Metrica principale che combina:
+- **Completeness (40%)**: Percentuale task schedulati
+- **Priority Compliance (40%)**: Rispetto ordine priorità
+- **Resource Efficiency (20%)**: Bilanciamento utilizzo risorse
+
+#### Soglie di Qualità
+- **SQS ≥ 80%**: Eccellente ✅
+- **SQS 60-79%**: Buona ⚠️
+- **SQS < 60%**: Da ottimizzare ❌
+
+#### Metriche Dettagliate
+```python
+{
+  "sqs": 85.2,                    # Schedule Quality Score
+  "completeness": 95.0,           # % task schedulati
+  "priority_compliance": 88.5,    # % rispetto priorità
+  "resource_efficiency": 72.3,    # Bilanciamento risorse
+  "scheduled_tasks": 95,          # Task schedulati
+  "total_tasks": 100              # Task totali
+}
+```
+
+### Scenari di Test
+
+#### 1. Scenario Produzione (100 task, 10 risorse)
+- **Obiettivo**: Simulare carico produzione reale
+- **Aspettative**: SQS ≥ 75%, Tempo < 10s (M4)
+- **Priorità**: 20% alta, 60% media, 20% bassa
+- **Assenze**: 15% distribuite
+
+#### 2. Scenario Carico Elevato (200 task, 10 risorse)
+- **Obiettivo**: Test con carico sostenuto
+- **Aspettative**: SQS ≥ 65%, Tempo < 20s (M4)
+- **Priorità**: 40% alta, 40% media, 20% bassa
+- **Assenze**: 25% concentrate
+
+#### 3. Scenario Stress (500 task, 10 risorse)
+- **Obiettivo**: Test limiti sistema
+- **Aspettative**: SQS ≥ 50%, Tempo < 60s (M4)
+- **Priorità**: Distribuzione realistica
+- **Assenze**: 30% sovrapposte
+
+### Benchmark MacBook Pro M4
+
+#### Performance Target
+| Task | Tempo Atteso | SQS Atteso | Memoria |
+|------|-------------|------------|---------|
+| 50   | < 3s        | ≥ 85%      | < 500MB |
+| 100  | < 8s        | ≥ 80%      | < 1GB   |
+| 200  | < 20s       | ≥ 70%      | < 2GB   |
+| 500  | < 60s       | ≥ 60%      | < 4GB   |
+
+#### Esecuzione Benchmark
+```bash
+# Benchmark completo
+make benchmark-m4
+
+# Output esempio:
+# 🏆 MacBook Pro M4 Benchmarks:
+#   50 tasks: 2.1s, SQS: 87.3%
+#   100 tasks: 5.8s, SQS: 82.1%
+#   200 tasks: 15.2s, SQS: 74.5%
+```
+
+### Report HTML
+
+Il sistema genera report HTML completi con:
+
+#### Dashboard Qualità
+- **Schedule Quality Score** principale
+- **Metriche dettagliate** per scenario
+- **Statistiche esecuzione** (tempo, memoria)
+- **Distribuzione priorità** task
+
+#### Visualizzazioni
+- **📅 Diagramma di Gantt**: Timeline attività
+- **👥 Utilizzo Risorse**: Heatmap carico
+- **📊 Distribuzione Task**: Statistiche ore
+- **⏱️ Timeline Interattiva**: Grafico Plotly
+
+#### Generazione Report
+```bash
+# Report completo (tutti gli scenari)
+make generate-report
+
+# Report specifico
+python tests/quality_report_generator.py --scenarios production high_load
+
+# Output:
+# 📄 Report: reports/quality_report_20250608_125430.html
+# 🌐 Open: file:///path/to/report.html
+```
+
+### Interpretazione Risultati
+
+#### Risultati Ottimali
+```
+✅ SUCCESS: Production Scenario
+📊 SQS: 85.2% (Eccellente)
+📈 Completeness: 95.0%
+🎯 Priority Compliance: 88.5%
+👥 Resource Efficiency: 72.3%
+⏱️ Execution Time: 5.8s
+```
+
+#### Risultati da Ottimizzare
+```
+⚠️ WARNING: High Load Scenario
+📊 SQS: 62.1% (Buona)
+📈 Completeness: 85.0%
+🎯 Priority Compliance: 65.2%
+👥 Resource Efficiency: 45.8%
+⏱️ Execution Time: 18.3s
+```
+
+#### Azioni Correttive
+- **SQS < 60%**: Verificare vincoli calendario e assenze
+- **Completeness < 80%**: Aumentare orizzonte temporale
+- **Priority Compliance < 70%**: Rivedere distribuzione priorità
+- **Resource Efficiency < 50%**: Bilanciare carico risorse
+
+### Troubleshooting Test
+
+#### Test Falliscono
+```bash
+# Verifica setup
+make setup
+
+# Controlla dipendenze
+pip install -r requirements.txt
+
+# Test singolo per debug
+pytest tests/test_scheduling_quality.py::TestSchedulingQuality::test_100_tasks_production_quality -v -s
+```
+
+#### Performance Lente
+```bash
+# Verifica sistema
+make info
+
+# Test rapido
+make quick-test
+
+# Profiling memoria
+pytest tests/test_scheduling_quality.py --memray
+```
+
+#### Report Non Generati
+```bash
+# Verifica directory
+mkdir -p reports/charts
+
+# Test generatore
+python tests/quality_report_generator.py --scenarios production
+
+# Controlla log
+tail -f logs/scheduler.log
+```
+
+### Integrazione CI/CD
+
+```bash
+# Pipeline completa
+make ci-test
+
+# Include:
+# - Setup ambiente
+# - Controlli stile codice
+# - Test qualità completi
+# - Generazione report
+```
+
+### Sviluppo e Debug
+
+```bash
+# Installa dipendenze sviluppo
+make install-dev
+
+# Controlli stile
+make lint
+
+# Formattazione codice
+make format
+
+# Coverage completa
+make coverage
+
+# Pulizia
+make clean
+```
+
+## 📊 Monitoraggio e Performance
+
+### Metriche Disponibili
+
+```json
+{
+  "algorithm_used": "greedy",
+  "tasks_scheduled": 45,
+  "tasks_total": 50,
+  "success_rate": 0.9,
+  "solve_time": 0.123,
+  "horizon_days": 28
+}
+```
+
+### Log Levels
+
+```bash
+# Configurazione logging
+LOG_LEVEL=DEBUG    # Dettagli completi
+LOG_LEVEL=INFO     # Informazioni principali (default)
+LOG_LEVEL=WARNING  # Solo avvisi ed errori
+LOG_LEVEL=ERROR    # Solo errori
 ```
 
 ## 🚨 Troubleshooting
 
 ### Problemi Comuni
 
-1. **Connessione Database**
-   ```bash
-   # Verifica connettività
-   docker-compose exec task-scheduler python -c "from src.db import get_db_connection; print(get_db_connection())"
-   ```
-
-2. **Soluzioni con Orizzonte Esteso**
-   - Il sistema estenderà automaticamente l'orizzonte temporale fino a trovare una soluzione
-   - Se l'orizzonte diventa molto ampio, verifica:
-     - Disponibilità calendari (giorni/ore lavorative sufficienti)
-     - Assenze eccessive che limitano gli slot disponibili
-   - Aumenta ORTOOLS_TIME_LIMIT per orizzonti molto estesi
-
-3. **Performance Lente**
-   - Riduci TASK_LIMIT
-   - Aumenta ORTOOLS_WORKERS
-   - Ottimizza query database
-
-### Log e Debug
-
+#### 1. API non risponde
 ```bash
-# Log in tempo reale
-docker-compose logs -f task-scheduler
+# Verifica stato container
+docker-compose ps
 
-# Log con livello debug
-docker-compose exec task-scheduler LOG_LEVEL=DEBUG python -m src.run
+# Controlla log
+docker-compose logs task-scheduler-api
+
+# Restart servizio
+docker-compose restart task-scheduler-api
 ```
 
-## 🌐 API REST
-
-Il Task Scheduler espone un'API REST che consente di invocare lo scheduler da sistemi esterni, come un'istanza Odoo 12, e ottenere i risultati della pianificazione in formato JSON.
-
-### Avvio del Server API
-
+#### 2. Nessuna soluzione trovata
 ```bash
-# Avvia il servizio API con Docker Compose
-docker-compose up -d task-scheduler-api
+# Verifica dati input:
+- Calendar slots sufficienti
+- Assenze non eccessive
+- Orizzonte temporale adeguato
 
-# Avvio manuale (senza Docker)
-python -m src.run_api --host 0.0.0.0 --port 5000
+# Aumenta orizzonte massimo
+MAX_HORIZON_DAYS=3650  # 10 anni
 ```
 
-### Endpoint Principali
+#### 3. Performance lente
+```bash
+# Usa algoritmo Greedy
+GREEDY_THRESHOLD_TASKS=10  # Soglia più bassa
 
-1. **Avvia una pianificazione**
-   - `POST /api/v1/schedule`
-   - Parametri: task_ids, initial_horizon_days, horizon_extension_factor
-   - Risposta: 202 Accepted con dettagli della pianificazione avviata
+# Riduci timeout OrTools
+ORTOOLS_TIMEOUT_SECONDS=15
 
-2. **Verifica lo stato della pianificazione**
-   - `GET /api/v1/schedule/status`
-   - Risposta: Stato attuale, tempi di esecuzione, messaggi
+# Aumenta worker
+ORTOOLS_WORKERS=8
+```
 
-3. **Recupera i risultati della pianificazione**
-   - `GET /api/v1/schedule/result`
-   - Risposta: Risultati completi in formato JSON
+#### 4. Memoria insufficiente
+```bash
+# Aumenta limiti Docker
+mem_limit: 8g
 
-### Integrazione con Odoo 12
+# Riduci orizzonte
+MAX_HORIZON_DAYS=365  # 1 anno
 
-L'API può essere facilmente integrata con Odoo 12 creando un modulo personalizzato che estende i modelli `project.task` e `project.task.type`. Un esempio di implementazione è disponibile nel file `_tmp/odoo12_client_example.py`.
+# Usa solo Greedy
+HYBRID_MODE=false
+```
+
+### Debug Avanzato
+
+```bash
+# Log dettagliato
+LOG_LEVEL=DEBUG
+
+# Progress OrTools
+ORTOOLS_LOG_PROGRESS=true
+
+# Shell interattiva per debug
+docker-compose exec task-scheduler-api python -m src.run
+scheduler> status
+scheduler> list
+```
+
+## 🔗 Integrazione con Sistemi Esterni
+
+### Esempio Odoo
 
 ```python
-# Esempio di chiamata API da Odoo 12
-def action_schedule_tasks(self):
-    task_ids = self.mapped('id')
+# In un modulo Odoo personalizzato
+import requests
+
+def schedule_tasks(self):
+    # Prepara dati
+    tasks_data = []
+    for task in self:
+        tasks_data.append({
+            'id': task.id,
+            'name': task.name,
+            'user_id': task.user_id.id,
+            'remaining_hours': task.remaining_hours
+        })
+
+    # Chiama API
     response = requests.post(
-        "http://task-scheduler-api:5000/api/v1/schedule",
-        json={"task_ids": task_ids}
+        'http://task-scheduler-api:5050/api/v1/schedule',
+        json={'tasks': tasks_data, 'calendar_slots': [...], 'leaves': [...]}
     )
-    # Gestisci la risposta...
+
+    # Gestisci risposta
+    if response.status_code == 202:
+        # Pianificazione avviata
+        return self._poll_for_results()
 ```
 
-Per una documentazione completa dell'API, consultare il file `_tmp/API_README.md`.
+### Esempio Python Generico
 
-## 🔄 Migrazione da SCIP
+```python
+import requests
+import time
 
-### Differenze Principali
+# Avvia pianificazione
+response = requests.post('http://localhost:5050/api/v1/schedule', json={
+    'tasks': [...],
+    'calendar_slots': [...],
+    'leaves': [...]
+})
 
-| Aspetto | SCIP | OrTools |
-|---------|------|---------|
-| Installazione | Compilazione complessa | pip install |
-| Dimensione | ~2GB | ~500MB |
-| Sintassi | pyscipopt | ortools.sat |
-| Performance | Buona | Eccellente |
-| Manutenzione | Complessa | Semplice |
+if response.status_code == 202:
+    # Attendi completamento
+    while True:
+        status = requests.get('http://localhost:5050/api/v1/schedule/status')
+        if status.json()['status'] == 'completed':
+            # Recupera risultati
+            result = requests.get('http://localhost:5050/api/v1/schedule/result')
+            schedule = result.json()['data']
+            break
+        time.sleep(1)
+```
 
-### Compatibilità
+## 📝 Changelog
 
-- ✅ Stesso formato output JSON
-- ✅ Stesse query Odoo
-- ✅ Stessa configurazione Docker Compose
-- ✅ Stessa shell interattiva
+### v2.0.0 - Algoritmo Ibrido
+- ✅ Implementazione algoritmo Greedy per performance
+- ✅ Strategia ibrida Greedy + OrTools
+- ✅ Fallback intelligente tra algoritmi
+- ✅ Ottimizzazione per grandi volumi di task
+
+### v1.5.0 - API REST Completa
+- ✅ API REST con dati completi (no più dipendenza da database)
+- ✅ Endpoint status e result separati
+- ✅ Supporto CORS per integrazione web
+
+### v1.0.0 - Versione Iniziale
+- ✅ Modello OrTools CP-SAT
+- ✅ Estensione automatica orizzonte temporale
+- ✅ Visualizzazioni grafiche
+- ✅ Containerizzazione Docker
+
+## 📄 Licenza
+
+Questo progetto è distribuito sotto licenza MIT. Vedi il file `LICENSE` per i dettagli.
+
+## 🤝 Contributi
+
+I contributi sono benvenuti! Per favore:
+
+1. Fork del repository
+2. Crea un branch per la feature (`git checkout -b feature/AmazingFeature`)
+3. Commit delle modifiche (`git commit -m 'Add some AmazingFeature'`)
+4. Push al branch (`git push origin feature/AmazingFeature`)
+5. Apri una Pull Request
+
+## 📞 Supporto
+
+Per supporto e domande:
+- Apri un issue su GitHub
+- Consulta i log per debugging: `docker-compose logs -f task-scheduler-api`
+- Usa la shell interattiva per test: `docker-compose exec task-scheduler-api python -m src.run`

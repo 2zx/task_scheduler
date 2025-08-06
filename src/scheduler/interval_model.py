@@ -179,8 +179,13 @@ class IntervalSchedulingModel:
 
             slot_conflicts = False
             for _, leave in task_leaves.iterrows():
-                leave_start = leave['date_from'].date()
-                leave_end = leave['date_to'].date()
+                # Gestisce sia datetime che date objects
+                leave_start = leave['date_from'] if hasattr(leave['date_from'], 'date') else leave['date_from']
+                leave_end = leave['date_to'] if hasattr(leave['date_to'], 'date') else leave['date_to']
+                if hasattr(leave_start, 'date'):
+                    leave_start = leave_start.date()
+                if hasattr(leave_end, 'date'):
+                    leave_end = leave_end.date()
                 slot_date = slot.start_datetime.date()
 
                 # Controlla sovrapposizione

@@ -8,10 +8,10 @@ services:
     user: "0:0"  # Esegui come root per evitare problemi di permessi
     command: python -m src.run_api --host 0.0.0.0 --port 5000
     ports:
-      - "5000:5000"
+      - "5050:5000"
     # Aumenta i limiti di memoria per il container
-    mem_limit: 4g
-    memswap_limit: 2g
+    mem_limit: 6g
+    memswap_limit: 6g
     volumes:
       - ./src:/app/src
       - ./logs:/app/logs
