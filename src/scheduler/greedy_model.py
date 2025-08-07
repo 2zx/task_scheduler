@@ -429,9 +429,22 @@ class GreedySchedulingModel:
         low_scheduled = sum(1 for _, task in low_priority_tasks.iterrows() if task['id'] in schedule)
 
         logger.info(f"🎯 Risultati Priority-First Greedy:")
-        logger.info(f"   Alta priorità: {high_scheduled}/{len(high_priority_tasks)} ({high_scheduled/len(high_priority_tasks)*100:.1f}%)")
-        logger.info(f"   Media priorità: {medium_scheduled}/{len(medium_priority_tasks)} ({medium_scheduled/len(medium_priority_tasks)*100:.1f}%)")
-        logger.info(f"   Bassa priorità: {low_scheduled}/{len(low_priority_tasks)} ({low_scheduled/len(low_priority_tasks)*100:.1f}%)")
+
+        # Controllo sicuro per evitare division by zero
+        if len(high_priority_tasks) > 0:
+            logger.info(f"   Alta priorità: {high_scheduled}/{len(high_priority_tasks)} ({high_scheduled/len(high_priority_tasks)*100:.1f}%)")
+        else:
+            logger.info(f"   Alta priorità: 0/0 (N/A)")
+
+        if len(medium_priority_tasks) > 0:
+            logger.info(f"   Media priorità: {medium_scheduled}/{len(medium_priority_tasks)} ({medium_scheduled/len(medium_priority_tasks)*100:.1f}%)")
+        else:
+            logger.info(f"   Media priorità: 0/0 (N/A)")
+
+        if len(low_priority_tasks) > 0:
+            logger.info(f"   Bassa priorità: {low_scheduled}/{len(low_priority_tasks)} ({low_scheduled/len(low_priority_tasks)*100:.1f}%)")
+        else:
+            logger.info(f"   Bassa priorità: 0/0 (N/A)")
 
         return schedule
 
