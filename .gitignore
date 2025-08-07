@@ -34,6 +34,9 @@ logs/*
 data/*
 !data/.gitkeep
 !reports/.gitkeep
+reports/*.html
+reports/*.json
+reports/*.csv
 reports/charts/*
 !reports/charts/.gitkeep
 

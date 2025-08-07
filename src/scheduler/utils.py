@@ -5,6 +5,31 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 
+def sort_tasks_by_priority(tasks_df):
+    """
+    Ordina i task per priorità in modo centralizzato.
+
+    REGOLA: priority_score più alto = priorità più alta
+    Ordinamento: DESCENDING (dal più alto al più basso)
+
+    Args:
+        tasks_df (DataFrame): DataFrame con i task da ordinare
+
+    Returns:
+        DataFrame: DataFrame ordinato per priorità
+    """
+    if 'priority_score' not in tasks_df.columns:
+        logger.warning("Colonna 'priority_score' non trovata, nessun ordinamento applicato")
+        return tasks_df.copy()
+
+    # Ordinamento DESCENDING: priority_score più alto = priorità più alta
+    sorted_df = tasks_df.sort_values('priority_score', ascending=False)
+
+    logger.info(f"Task ordinati per priorità (DESC): {sorted_df[['id', 'priority_score']].to_dict('records')}")
+
+    return sorted_df
+
+
 def generate_user_working_slots(task_calendar_df, leave_df, start_date, end_date):
     """
     Genera gli slot di lavoro disponibili per ogni task, tenendo conto del calendario

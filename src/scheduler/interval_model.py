@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import List, Dict, Tuple
 
 from ..config import ORTOOLS_PARAMS, SCHEDULER_CONFIG
+from .utils import sort_tasks_by_priority
 
 logger = logging.getLogger(__name__)
 
@@ -64,10 +65,8 @@ class IntervalSchedulingModel:
         self.horizon_extension_factor = horizon_extension_factor
         self.current_horizon_days = initial_horizon_days
 
-        # Ordina i task per priorità (score più basso = priorità più alta)
-        if 'priority_score' in self.tasks_df.columns:
-            self.tasks_df = self.tasks_df.sort_values('priority_score', ascending=True)
-            logger.info(f"Task ordinati per priorità: {self.tasks_df[['id', 'priority_score']].to_dict('records')}")
+        # Ordina i task per priorità usando la funzione centralizzata
+        self.tasks_df = sort_tasks_by_priority(self.tasks_df)
 
         self.model = None
         self.solver = None
@@ -327,26 +326,34 @@ class IntervalSchedulingModel:
         """Crea funzione obiettivo che considera priorità e contiguità"""
         objective_terms = []
 
-        # Termine 1: Priorità - penalizza ritardi per task ad alta priorità
+        # Termine 1: PRIORITÀ FORTE - penalizza fortemente task a bassa priorità schedulati prima di quelli ad alta priorità
+        max_priority = self.tasks_df['priority_score'].max()
+        min_priority = self.tasks_df['priority_score'].min()
+        priority_range = max_priority - min_priority if max_priority != min_priority else 1.0
+
         for _, task in self.tasks_df.iterrows():
             task_id = task['id']
             priority_score = task.get('priority_score', 50.0)
 
-            # Peso priorità: più basso il score, più alta la penalità per ritardi
-            priority_weight = 100.0 / (priority_score + 1.0)
+            # Peso priorità FORTE: più bassa la priorità, più alta la penalità
+            # Normalizza tra 1 e 1000 per dare peso molto forte alle priorità
+            normalized_priority = (max_priority - priority_score) / priority_range
+            priority_penalty = 1 + (normalized_priority * 999)  # Da 1 a 1000
 
-            # Penalizza assegnazione a slot tardivi per task prioritari
+            # Penalizza FORTEMENTE l'assegnazione di task a bassa priorità
             for slot_idx, slot in enumerate(self.contiguous_slots):
                 if slot.task_id == task_id and (task_id, slot_idx) in self.vars['assign']:
                     # Calcola "lateness" del slot (giorni dall'inizio orizzonte)
                     days_from_start = (slot.start_datetime.date() - self.days[0]).days
-                    lateness_penalty = days_from_start * priority_weight
+
+                    # Penalità combinata: priorità * lateness (peso molto forte per priorità)
+                    combined_penalty = priority_penalty * (1 + days_from_start * 0.1)
 
                     objective_terms.append(
-                        lateness_penalty * self.vars['assign'][task_id, slot_idx]
+                        combined_penalty * self.vars['assign'][task_id, slot_idx]
                     )
 
-        # Termine 2: Contiguità - preferisce meno slot per task
+        # Termine 2: Contiguità - preferisce meno slot per task (peso molto minore)
         for _, task in self.tasks_df.iterrows():
             task_id = task['id']
 
@@ -357,13 +364,13 @@ class IntervalSchedulingModel:
                 if slot.task_id == task_id and (task_id, slot_idx) in self.vars['assign']
             ]
 
-            # Penalizza uso di molti slot (preferisce contiguità)
+            # Penalizza uso di molti slot (peso MOLTO minore rispetto a priorità)
             for assign_var in assign_vars:
-                objective_terms.append(0.1 * assign_var)  # Peso minore rispetto a priorità
+                objective_terms.append(0.001 * assign_var)  # Peso minimo per non interferire con priorità
 
         if objective_terms:
             self.model.Minimize(sum(objective_terms))
-            logger.info(f"Obiettivo creato con {len(objective_terms)} termini")
+            logger.info(f"Obiettivo creato con {len(objective_terms)} termini (priorità FORTE)")
         else:
             logger.warning("Nessun termine nell'obiettivo!")
 

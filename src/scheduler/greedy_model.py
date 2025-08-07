@@ -6,6 +6,7 @@ from typing import Dict, List
 from dataclasses import dataclass
 
 from ..config import SCHEDULER_CONFIG
+from .utils import sort_tasks_by_priority
 
 logger = logging.getLogger(__name__)
 
@@ -51,8 +52,18 @@ class ScheduledSlot:
 class GreedySchedulingModel:
     """
     Algoritmo greedy ottimizzato per la pianificazione di centinaia di task.
+    Implementa strategia "Priority-First Greedy" per massimizzare Priority Compliance.
     Complessità O(n log n) invece di esponenziale.
     """
+
+    # Configurazione Priority-First Greedy
+    PRIORITY_THRESHOLDS = {
+        'high': 80,      # Schedulazione garantita (pre-allocazione)
+        'medium': 50,    # Schedulazione preferenziale (con lookahead)
+        'low': 0         # Schedulazione opportunistica (slot rimanenti)
+    }
+
+    LOOKAHEAD_DEPTH = 3  # Quanti task futuri considerare per contention
 
     def __init__(self, tasks_df, calendar_slots_df, leaves_df, initial_horizon_days=28):
         """
@@ -115,6 +126,9 @@ class GreedySchedulingModel:
     def _sort_tasks_optimally(self):
         """Ordina i task per massimizzare l'efficacia dell'algoritmo greedy"""
 
+        # Prima applica l'ordinamento centralizzato per priorità
+        self.tasks_df = sort_tasks_by_priority(self.tasks_df)
+
         # Gestione sicura dei nuovi parametri di gerarchia (backward compatibility)
         if 'hierarchy_level' not in self.tasks_df.columns:
             self.tasks_df['hierarchy_level'] = 0
@@ -124,7 +138,7 @@ class GreedySchedulingModel:
             self.tasks_df['parent_id'] = None
 
         # Ordinamento multi-criterio per ottimizzare greedy con gerarchia
-        # 1. priority_score (DESC) - priorità principale
+        # 1. priority_score (DESC) - priorità principale (già applicata dalla funzione centralizzata)
         # 2. hierarchy_level (ASC) - figli prima dei padri (0=foglia, 1=padre di foglia, etc.)
         # 3. is_leaf_task (DESC) - task foglia prima di quelli con figli
         # 4. remaining_hours (DESC) - task lunghi prima per ottimizzare allocazione
@@ -340,29 +354,273 @@ class GreedySchedulingModel:
             return False
 
     def _greedy_algorithm(self) -> Dict[int, List[ScheduledSlot]]:
-        """Algoritmo greedy principale per la pianificazione"""
+        """Algoritmo Priority-First Greedy per massimizzare Priority Compliance"""
 
         schedule = {}
 
-        # Per ogni task in ordine di priorità
-        for _, task in self.tasks_df.iterrows():
+        # Classifica task per priorità
+        high_priority_tasks, medium_priority_tasks, low_priority_tasks = self._classify_tasks_by_priority()
+
+        logger.info(f"🎯 Priority-First Greedy: {len(high_priority_tasks)} alta, {len(medium_priority_tasks)} media, {len(low_priority_tasks)} bassa priorità")
+
+        # FASE 1: Pre-allocazione task ad alta priorità (schedulazione garantita)
+        logger.info("📋 FASE 1: Pre-allocazione task ad alta priorità")
+        for _, task in high_priority_tasks.iterrows():
             task_id = task['id']
             user_id = task['user_id']
             hours_needed = task['remaining_hours']
+            priority_score = task['priority_score']
 
-            logger.debug(f"Schedulando task {task_id}: {hours_needed}h remaining_hours per user {user_id}")
+            logger.debug(f"Pre-allocazione task {task_id} (priorità {priority_score:.1f}): {hours_needed}h per user {user_id}")
 
-            # Trova slot consecutivi per questo task
-            assigned_slots = self._find_consecutive_slots(user_id, hours_needed, task_id)
+            # Trova i MIGLIORI slot disponibili (primi cronologicamente)
+            assigned_slots = self._find_best_slots_for_high_priority(user_id, hours_needed, task_id)
 
             if assigned_slots:
                 schedule[task_id] = assigned_slots
                 self._mark_slots_occupied(user_id, assigned_slots)
-                logger.debug(f"Task {task_id} schedulato: {len(assigned_slots)} slot")
+                logger.debug(f"✅ Task alta priorità {task_id} schedulato: {len(assigned_slots)} slot")
             else:
-                logger.warning(f"Impossibile schedulare task {task_id} ({hours_needed}h)")
+                logger.warning(f"❌ CRITICO: Task alta priorità {task_id} ({hours_needed}h) NON schedulato!")
+
+        # FASE 2: Allocazione preferenziale task a media priorità (con lookahead)
+        logger.info("📋 FASE 2: Allocazione preferenziale task a media priorità")
+        for _, task in medium_priority_tasks.iterrows():
+            task_id = task['id']
+            user_id = task['user_id']
+            hours_needed = task['remaining_hours']
+            priority_score = task['priority_score']
+
+            logger.debug(f"Allocazione preferenziale task {task_id} (priorità {priority_score:.1f}): {hours_needed}h per user {user_id}")
+
+            # Trova slot con lookahead limitato
+            assigned_slots = self._find_slots_with_lookahead(user_id, hours_needed, task_id, medium_priority_tasks)
+
+            if assigned_slots:
+                schedule[task_id] = assigned_slots
+                self._mark_slots_occupied(user_id, assigned_slots)
+                logger.debug(f"✅ Task media priorità {task_id} schedulato: {len(assigned_slots)} slot")
+            else:
+                logger.warning(f"⚠️ Task media priorità {task_id} ({hours_needed}h) NON schedulato")
+
+        # FASE 3: Allocazione opportunistica task a bassa priorità (slot rimanenti)
+        logger.info("📋 FASE 3: Allocazione opportunistica task a bassa priorità")
+        for _, task in low_priority_tasks.iterrows():
+            task_id = task['id']
+            user_id = task['user_id']
+            hours_needed = task['remaining_hours']
+            priority_score = task['priority_score']
+
+            logger.debug(f"Allocazione opportunistica task {task_id} (priorità {priority_score:.1f}): {hours_needed}h per user {user_id}")
+
+            # Usa slot rimanenti senza garanzie
+            assigned_slots = self._find_remaining_slots(user_id, hours_needed, task_id)
+
+            if assigned_slots:
+                schedule[task_id] = assigned_slots
+                self._mark_slots_occupied(user_id, assigned_slots)
+                logger.debug(f"✅ Task bassa priorità {task_id} schedulato: {len(assigned_slots)} slot")
+            else:
+                logger.debug(f"💡 Task bassa priorità {task_id} ({hours_needed}h) NON schedulato (accettabile)")
+
+        # Log statistiche finali per fase
+        high_scheduled = sum(1 for _, task in high_priority_tasks.iterrows() if task['id'] in schedule)
+        medium_scheduled = sum(1 for _, task in medium_priority_tasks.iterrows() if task['id'] in schedule)
+        low_scheduled = sum(1 for _, task in low_priority_tasks.iterrows() if task['id'] in schedule)
+
+        logger.info(f"🎯 Risultati Priority-First Greedy:")
+        logger.info(f"   Alta priorità: {high_scheduled}/{len(high_priority_tasks)} ({high_scheduled/len(high_priority_tasks)*100:.1f}%)")
+        logger.info(f"   Media priorità: {medium_scheduled}/{len(medium_priority_tasks)} ({medium_scheduled/len(medium_priority_tasks)*100:.1f}%)")
+        logger.info(f"   Bassa priorità: {low_scheduled}/{len(low_priority_tasks)} ({low_scheduled/len(low_priority_tasks)*100:.1f}%)")
 
         return schedule
+
+    def _classify_tasks_by_priority(self):
+        """Classifica i task per priorità secondo le soglie configurate"""
+
+        high_threshold = self.PRIORITY_THRESHOLDS['high']
+        medium_threshold = self.PRIORITY_THRESHOLDS['medium']
+
+        high_priority_tasks = self.tasks_df[self.tasks_df['priority_score'] >= high_threshold]
+        medium_priority_tasks = self.tasks_df[
+            (self.tasks_df['priority_score'] >= medium_threshold) &
+            (self.tasks_df['priority_score'] < high_threshold)
+        ]
+        low_priority_tasks = self.tasks_df[self.tasks_df['priority_score'] < medium_threshold]
+
+        logger.debug(f"Classificazione priorità: {len(high_priority_tasks)} alta (>={high_threshold}), "
+                    f"{len(medium_priority_tasks)} media ({medium_threshold}-{high_threshold}), "
+                    f"{len(low_priority_tasks)} bassa (<{medium_threshold})")
+
+        return high_priority_tasks, medium_priority_tasks, low_priority_tasks
+
+    def _find_best_slots_for_high_priority(self, user_id: int, hours_needed: float, task_id: int) -> List[ScheduledSlot]:
+        """Trova i MIGLIORI slot disponibili per task ad alta priorità (primi cronologicamente)"""
+
+        if user_id not in self.available_blocks:
+            logger.warning(f"Task alta priorità {task_id}: User {user_id} non ha blocchi disponibili")
+            return []
+
+        hours_needed_int = int(math.ceil(hours_needed))
+
+        # Per task ad alta priorità, usa strategia aggressiva:
+        # 1. Prima i migliori slot consecutivi (single-day)
+        # 2. Poi multi-day se necessario
+        # 3. Infine flessibile se assolutamente necessario
+
+        # Strategia 1: Slot consecutivi nei primi giorni disponibili
+        slots = self._find_earliest_consecutive_slots(user_id, hours_needed_int, task_id)
+        if slots:
+            logger.debug(f"Task alta priorità {task_id}: trovati slot consecutivi precoci")
+            return slots
+
+        # Strategia 2: Multi-day nei primi giorni
+        slots = self._find_multi_day_slots(user_id, hours_needed_int, task_id)
+        if slots:
+            logger.debug(f"Task alta priorità {task_id}: trovati slot multi-giorno")
+            return slots
+
+        # Strategia 3: Flessibile come ultima risorsa
+        slots = self._find_flexible_slots_improved(user_id, hours_needed_int, task_id)
+        if slots:
+            logger.debug(f"Task alta priorità {task_id}: trovati slot flessibili")
+            return slots
+
+        logger.warning(f"Task alta priorità {task_id}: NESSUN slot trovato!")
+        return []
+
+    def _find_earliest_consecutive_slots(self, user_id: int, hours_needed_int: int, task_id: int) -> List[ScheduledSlot]:
+        """Trova slot consecutivi nei primi giorni disponibili"""
+
+        # Ordina blocchi per data (priorità assoluta ai primi giorni)
+        blocks = sorted(self.available_blocks[user_id], key=lambda b: b.start_datetime)
+
+        # Raggruppa per data e prova in ordine cronologico
+        blocks_by_date = {}
+        for block in blocks:
+            date_str = block.start_datetime.strftime('%Y-%m-%d')
+            if date_str not in blocks_by_date:
+                blocks_by_date[date_str] = []
+            blocks_by_date[date_str].append(block)
+
+        # Prova ogni giorno in ordine cronologico
+        for date_str in sorted(blocks_by_date.keys()):
+            day_slots = self._find_best_day_slots(user_id, date_str, hours_needed_int, task_id)
+            if len(day_slots) >= hours_needed_int:
+                return day_slots[:hours_needed_int]
+
+        return []
+
+    def _find_slots_with_lookahead(self, user_id: int, hours_needed: float, task_id: int, medium_priority_tasks) -> List[ScheduledSlot]:
+        """Trova slot per task a media priorità con lookahead limitato"""
+
+        if user_id not in self.available_blocks:
+            logger.warning(f"Task media priorità {task_id}: User {user_id} non ha blocchi disponibili")
+            return []
+
+        hours_needed_int = int(math.ceil(hours_needed))
+
+        # Per task a media priorità, usa strategia bilanciata:
+        # 1. Slot consecutivi (ma non necessariamente i primi)
+        # 2. Multi-day con preferenza per giorni meno contesi
+        # 3. Flessibile con gap limitati
+
+        # Strategia 1: Slot consecutivi con lookahead
+        slots = self._find_consecutive_slots_with_contention_check(user_id, hours_needed_int, task_id, medium_priority_tasks)
+        if slots:
+            logger.debug(f"Task media priorità {task_id}: trovati slot consecutivi con lookahead")
+            return slots
+
+        # Strategia 2: Multi-day standard
+        slots = self._find_multi_day_slots(user_id, hours_needed_int, task_id)
+        if slots:
+            logger.debug(f"Task media priorità {task_id}: trovati slot multi-giorno")
+            return slots
+
+        # Strategia 3: Flessibile limitato
+        if hours_needed_int > 4:  # Solo per task > 4 ore
+            slots = self._find_flexible_slots_improved(user_id, hours_needed_int, task_id)
+            if slots:
+                logger.debug(f"Task media priorità {task_id}: trovati slot flessibili")
+                return slots
+
+        return []
+
+    def _find_consecutive_slots_with_contention_check(self, user_id: int, hours_needed_int: int, task_id: int, medium_priority_tasks) -> List[ScheduledSlot]:
+        """Trova slot consecutivi evitando giorni molto contesi da altri task a media priorità"""
+
+        # Calcola contention per ogni giorno
+        contention_by_date = self._calculate_date_contention(user_id, medium_priority_tasks)
+
+        # Ordina blocchi per data, preferendo giorni meno contesi
+        blocks = sorted(self.available_blocks[user_id], key=lambda b: (
+            contention_by_date.get(b.start_datetime.strftime('%Y-%m-%d'), 0),  # Meno contesi prima
+            b.start_datetime  # Poi cronologico
+        ))
+
+        # Raggruppa per data
+        blocks_by_date = {}
+        for block in blocks:
+            date_str = block.start_datetime.strftime('%Y-%m-%d')
+            if date_str not in blocks_by_date:
+                blocks_by_date[date_str] = []
+            blocks_by_date[date_str].append(block)
+
+        # Prova ogni giorno in ordine di contention
+        for date_str in sorted(blocks_by_date.keys(), key=lambda d: contention_by_date.get(d, 0)):
+            day_slots = self._find_best_day_slots(user_id, date_str, hours_needed_int, task_id)
+            if len(day_slots) >= hours_needed_int:
+                return day_slots[:hours_needed_int]
+
+        return []
+
+    def _calculate_date_contention(self, user_id: int, medium_priority_tasks) -> Dict[str, int]:
+        """Calcola quanti task a media priorità potrebbero competere per ogni giorno"""
+
+        contention = {}
+
+        # Per ogni task a media priorità dello stesso utente
+        user_medium_tasks = medium_priority_tasks[medium_priority_tasks['user_id'] == user_id]
+
+        for date_str in set(block.start_datetime.strftime('%Y-%m-%d') for block in self.available_blocks[user_id]):
+            # Conta quanti task potrebbero usare questo giorno
+            contention[date_str] = len(user_medium_tasks)
+
+        return contention
+
+    def _find_remaining_slots(self, user_id: int, hours_needed: float, task_id: int) -> List[ScheduledSlot]:
+        """Trova slot rimanenti per task a bassa priorità (senza garanzie)"""
+
+        if user_id not in self.available_blocks:
+            return []
+
+        hours_needed_int = int(math.ceil(hours_needed))
+
+        # Per task a bassa priorità, usa strategia opportunistica:
+        # Prendi qualsiasi slot disponibile, senza preferenze particolari
+
+        # Strategia 1: Prova slot consecutivi se disponibili
+        slots = self._find_single_day_slots(user_id, hours_needed_int, task_id)
+        if slots:
+            return slots
+
+        # Strategia 2: Multi-day se necessario
+        slots = self._find_multi_day_slots(user_id, hours_needed_int, task_id)
+        if slots:
+            return slots
+
+        # Strategia 3: Flessibile come ultima risorsa
+        slots = self._find_flexible_slots(user_id, hours_needed_int, task_id)
+        if slots:
+            return slots
+
+        # Strategia 4: Distribuito per task molto lunghi
+        if hours_needed_int > 16:
+            slots = self._find_distributed_slots(user_id, hours_needed_int, task_id)
+            if slots:
+                return slots
+
+        return []
 
     def _find_consecutive_slots(self, user_id: int, hours_needed: float, task_id: int) -> List[ScheduledSlot]:
         """Trova slot ottimali per un task con algoritmo migliorato per evitare sovrapposizioni"""
@@ -895,23 +1153,24 @@ def should_use_greedy(tasks_df: pd.DataFrame) -> bool:
     total_hours = tasks_df['remaining_hours'].sum()
     num_users = tasks_df['user_id'].nunique()
 
+    # TEMPORANEO: Soglie più basse per testare Priority-First Greedy
     # Usa greedy se:
-    # - Molti task (>50)
-    # - Molte ore totali (>1000)
-    # - Molte risorse (>10)
+    # - Molti task (>30 invece di >50)
+    # - Molte ore totali (>150 invece di >1000)
+    # - Molte risorse (>4 invece di >10)
     # - Task molto lunghi (media >100h)
 
     avg_hours = total_hours / num_tasks if num_tasks > 0 else 0
 
     use_greedy = (
-        num_tasks > 50 or
-        total_hours > 1000 or
-        num_users > 10 or
+        num_tasks > 30 or
+        total_hours > 150 or
+        num_users > 4 or
         avg_hours > 100
     )
 
     logger.info(f"Decisione algoritmo: tasks={num_tasks}, remaining_hours={total_hours:.1f}, "
                 f"users={num_users}, avg_hours={avg_hours:.1f} → "
-                f"{'GREEDY' if use_greedy else 'ORTOOLS'}")
+                f"{'GREEDY' if use_greedy else 'ORTOOLS'} (SOGLIE RIDOTTE PER TEST)")
 
     return use_greedy

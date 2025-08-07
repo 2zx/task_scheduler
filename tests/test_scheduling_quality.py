@@ -12,6 +12,19 @@ import logging
 from src.scheduler.model import SchedulingModel
 from tests.realistic_data_generator import generate_scenario, print_scenario_stats
 
+# Import soglie centralizzate
+from src.config_thresholds import (
+    SQS_WEIGHTS,
+    PRODUCTION_SCENARIO_THRESHOLDS,
+    HIGH_LOAD_SCENARIO_THRESHOLDS,
+    STRESS_SCENARIO_THRESHOLDS,
+    PRIORITY_RESPECT_THRESHOLDS,
+    RESOURCE_BALANCE_THRESHOLDS,
+    BENCHMARK_M4_THRESHOLDS,
+    CALENDAR_DISTRIBUTION_THRESHOLDS,
+    get_scenario_thresholds
+)
+
 # Configura logging per i test
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -197,13 +210,16 @@ class TestSchedulingQuality(unittest.TestCase):
         logger.info(f"   Resource Efficiency: {quality_metrics['resource_efficiency']:.2f}%")
         logger.info(f"   Tasks Scheduled: {quality_metrics['scheduled_tasks']}/{quality_metrics['total_tasks']}")
 
+        # Usa soglie centralizzate per production scenario
+        thresholds = PRODUCTION_SCENARIO_THRESHOLDS
+
         # Assertions per qualità
-        self.assertGreaterEqual(quality_metrics['sqs'], 75.0,
-                               f"SQS should be >= 75% for production scenario, got {quality_metrics['sqs']:.2f}%")
-        self.assertGreaterEqual(quality_metrics['completeness'], 80.0,
-                               f"Completeness should be >= 80%, got {quality_metrics['completeness']:.2f}%")
-        self.assertLess(execution_time, 10.0,
-                       f"Execution should be < 10s on M4, got {execution_time:.2f}s")
+        self.assertGreaterEqual(quality_metrics['sqs'], thresholds['sqs_min'],
+                               f"SQS should be >= {thresholds['sqs_min']}% for production scenario, got {quality_metrics['sqs']:.2f}%")
+        self.assertGreaterEqual(quality_metrics['completeness'], thresholds['completeness_min'],
+                               f"Completeness should be >= {thresholds['completeness_min']}%, got {quality_metrics['completeness']:.2f}%")
+        self.assertLess(execution_time, thresholds['max_execution_time'],
+                       f"Execution should be < {thresholds['max_execution_time']}s on M4, got {execution_time:.2f}s")
 
     def test_200_tasks_high_load_quality(self):
         """Test qualità scenario carico elevato con 200 task"""
@@ -237,15 +253,18 @@ class TestSchedulingQuality(unittest.TestCase):
         logger.info(f"   Priority Compliance: {quality_metrics['priority_compliance']:.2f}%")
         logger.info(f"   Resource Efficiency: {quality_metrics['resource_efficiency']:.2f}%")
 
+        # Usa soglie centralizzate per high load scenario
+        thresholds = HIGH_LOAD_SCENARIO_THRESHOLDS
+
         # Assertions per carico elevato
-        self.assertGreaterEqual(quality_metrics['sqs'], 65.0,
-                               f"SQS should be >= 65% for high load, got {quality_metrics['sqs']:.2f}%")
-        self.assertGreaterEqual(quality_metrics['completeness'], 70.0,
-                               f"Completeness should be >= 70%, got {quality_metrics['completeness']:.2f}%")
-        self.assertGreaterEqual(quality_metrics['priority_compliance'], 80.0,
-                               f"Priority compliance should be >= 80%, got {quality_metrics['priority_compliance']:.2f}%")
-        self.assertLess(execution_time, 20.0,
-                       f"Execution should be < 20s on M4, got {execution_time:.2f}s")
+        self.assertGreaterEqual(quality_metrics['sqs'], thresholds['sqs_min'],
+                               f"SQS should be >= {thresholds['sqs_min']}% for high load, got {quality_metrics['sqs']:.2f}%")
+        self.assertGreaterEqual(quality_metrics['completeness'], thresholds['completeness_min'],
+                               f"Completeness should be >= {thresholds['completeness_min']}%, got {quality_metrics['completeness']:.2f}%")
+        self.assertGreaterEqual(quality_metrics['priority_compliance'], thresholds['priority_compliance_min'],
+                               f"Priority compliance should be >= {thresholds['priority_compliance_min']}%, got {quality_metrics['priority_compliance']:.2f}%")
+        self.assertLess(execution_time, thresholds['max_execution_time'],
+                       f"Execution should be < {thresholds['max_execution_time']}s on M4, got {execution_time:.2f}s")
 
     def test_500_tasks_stress_quality(self):
         """Test qualità scenario stress con 500 task"""
@@ -278,17 +297,21 @@ class TestSchedulingQuality(unittest.TestCase):
             logger.info(f"   Priority Compliance: {quality_metrics['priority_compliance']:.2f}%")
             logger.info(f"   Resource Efficiency: {quality_metrics['resource_efficiency']:.2f}%")
 
+            # Usa soglie centralizzate per stress scenario
+            thresholds = STRESS_SCENARIO_THRESHOLDS
+
             # Assertions più permissive per stress test
-            self.assertGreaterEqual(quality_metrics['sqs'], 50.0,
-                                   f"SQS should be >= 50% for stress test, got {quality_metrics['sqs']:.2f}%")
-            self.assertGreaterEqual(quality_metrics['completeness'], 60.0,
-                                   f"Completeness should be >= 60%, got {quality_metrics['completeness']:.2f}%")
+            self.assertGreaterEqual(quality_metrics['sqs'], thresholds['sqs_min'],
+                                   f"SQS should be >= {thresholds['sqs_min']}% for stress test, got {quality_metrics['sqs']:.2f}%")
+            self.assertGreaterEqual(quality_metrics['completeness'], thresholds['completeness_min'],
+                                   f"Completeness should be >= {thresholds['completeness_min']}%, got {quality_metrics['completeness']:.2f}%")
         else:
             logger.warning("⚠️  Stress test failed to find solution - this may be acceptable")
 
-        # Performance assertion per M4
-        self.assertLess(execution_time, 60.0,
-                       f"Execution should be < 60s on M4, got {execution_time:.2f}s")
+        # Usa soglie centralizzate per tempo di esecuzione
+        thresholds = STRESS_SCENARIO_THRESHOLDS
+        self.assertLess(execution_time, thresholds['max_execution_time'],
+                       f"Execution should be < {thresholds['max_execution_time']}s on M4, got {execution_time:.2f}s")
 
     def test_priority_respect_quality(self):
         """Test specifico per rispetto delle priorità"""
@@ -341,11 +364,14 @@ class TestSchedulingQuality(unittest.TestCase):
         logger.info(f"   Priority Compliance: {quality_metrics['priority_compliance']:.2f}%")
         logger.info(f"   Completeness: {quality_metrics['completeness']:.2f}%")
 
+        # Usa soglie centralizzate per priority respect
+        thresholds = PRIORITY_RESPECT_THRESHOLDS
+
         # Verifica che le priorità siano rispettate
-        self.assertGreaterEqual(quality_metrics['priority_compliance'], 85.0,
-                               f"Priority compliance should be >= 85%, got {quality_metrics['priority_compliance']:.2f}%")
-        self.assertGreaterEqual(quality_metrics['completeness'], 95.0,
-                               f"Completeness should be >= 95% for simple scenario, got {quality_metrics['completeness']:.2f}%")
+        self.assertGreaterEqual(quality_metrics['priority_compliance'], thresholds['priority_compliance_min'],
+                               f"Priority compliance should be >= {thresholds['priority_compliance_min']}%, got {quality_metrics['priority_compliance']:.2f}%")
+        self.assertGreaterEqual(quality_metrics['completeness'], thresholds['completeness_min'],
+                               f"Completeness should be >= {thresholds['completeness_min']}% for simple scenario, got {quality_metrics['completeness']:.2f}%")
 
     def test_resource_balance_quality(self):
         """Test bilanciamento delle risorse"""
@@ -372,9 +398,12 @@ class TestSchedulingQuality(unittest.TestCase):
 
         logger.info(f"   Resource Efficiency: {quality_metrics['resource_efficiency']:.2f}%")
 
+        # Usa soglie centralizzate per resource balance
+        thresholds = RESOURCE_BALANCE_THRESHOLDS
+
         # Verifica bilanciamento
-        self.assertGreaterEqual(quality_metrics['resource_efficiency'], 60.0,
-                               f"Resource efficiency should be >= 60%, got {quality_metrics['resource_efficiency']:.2f}%")
+        self.assertGreaterEqual(quality_metrics['resource_efficiency'], thresholds['resource_efficiency_min'],
+                               f"Resource efficiency should be >= {thresholds['resource_efficiency_min']}%, got {quality_metrics['resource_efficiency']:.2f}%")
 
 
 class TestPerformanceBenchmarks(unittest.TestCase):
@@ -384,11 +413,8 @@ class TestPerformanceBenchmarks(unittest.TestCase):
         """Benchmark di performance per MacBook Pro M4"""
         logger.info("🚀 Running performance benchmarks for MacBook Pro M4")
 
-        benchmarks = [
-            {'tasks': 50, 'expected_time': 3.0, 'expected_sqs': 85.0},
-            {'tasks': 100, 'expected_time': 8.0, 'expected_sqs': 80.0},
-            {'tasks': 200, 'expected_time': 20.0, 'expected_sqs': 70.0},
-        ]
+        # Usa soglie centralizzate per benchmark
+        benchmarks = BENCHMARK_M4_THRESHOLDS
 
         results = []
 
@@ -436,6 +462,247 @@ class TestPerformanceBenchmarks(unittest.TestCase):
         logger.info("🏆 Performance Benchmark Summary:")
         for result in results:
             logger.info(f"   {result['tasks']} tasks: {result['execution_time']:.2f}s, SQS: {result['sqs']:.2f}%")
+
+
+class TestCalendarDistributionVisualization(unittest.TestCase):
+    """Test con rappresentazione grafica della distribuzione calendario"""
+
+    def setUp(self):
+        """Setup per i test"""
+        self.maxDiff = None
+        logger.info("=" * 60)
+        logger.info(f"Starting test: {self._testMethodName}")
+
+    def tearDown(self):
+        """Cleanup dopo i test"""
+        logger.info(f"Completed test: {self._testMethodName}")
+        logger.info("=" * 60)
+
+    def test_calendar_distribution_visualization(self):
+        """Test con visualizzazioni calendario complete"""
+        logger.info("📅 Testing calendar distribution with full visualization")
+
+        # Genera scenario medio (100 task, 10 risorse, ~2 settimane)
+        tasks_df, calendar_slots_df, leaves_df = generate_scenario(
+            'production', num_tasks=100, num_resources=10
+        )
+
+        print_scenario_stats(tasks_df, calendar_slots_df, leaves_df)
+
+        # Esegui scheduling
+        start_time = time.time()
+        model = SchedulingModel(tasks_df, calendar_slots_df, leaves_df)
+        success = model.solve()
+        execution_time = time.time() - start_time
+
+        # Verifica successo
+        self.assertTrue(success, "Calendar distribution test should succeed")
+        self.assertIsNotNone(model.solution, "Solution should be generated")
+
+        # Ottieni DataFrame soluzione
+        solution_df = model.get_solution_dataframe()
+        self.assertIsNotNone(solution_df, "Solution DataFrame should be generated")
+
+        # Calcola metriche qualità
+        quality_metrics = QualityMetrics.calculate_schedule_quality_score(solution_df, tasks_df)
+
+        # Log risultati base
+        logger.info(f"⏱️  Execution time: {execution_time:.2f} seconds")
+        logger.info(f"📊 Quality Metrics:")
+        logger.info(f"   SQS: {quality_metrics['sqs']:.2f}%")
+        logger.info(f"   Completeness: {quality_metrics['completeness']:.2f}%")
+        logger.info(f"   Priority Compliance: {quality_metrics['priority_compliance']:.2f}%")
+        logger.info(f"   Resource Efficiency: {quality_metrics['resource_efficiency']:.2f}%")
+
+        # ============================================================================
+        # GENERAZIONE VISUALIZZAZIONI CALENDARIO
+        # ============================================================================
+
+        logger.info("🎨 Generazione visualizzazioni calendario...")
+
+        # Import visualizer
+        from src.scheduler.visualization import ScheduleVisualizer
+
+        # Crea visualizer con directory reports/charts
+        import os
+        charts_dir = os.path.join("reports", "charts")
+        os.makedirs(charts_dir, exist_ok=True)
+
+        visualizer = ScheduleVisualizer(solution_df, tasks_df, output_dir=charts_dir)
+
+        # Genera tutti i grafici calendario
+        calendar_charts = visualizer.generate_calendar_charts()
+
+        # Verifica che tutti i grafici siano stati generati
+        expected_charts = [
+            'calendar_heatmap',
+            'weekly_distribution',
+            'hourly_timeline',
+            'resource_calendar',
+            'priority_timeline'
+        ]
+
+        for chart_name in expected_charts:
+            self.assertIn(chart_name, calendar_charts, f"Chart {chart_name} should be generated")
+            if calendar_charts[chart_name]:
+                self.assertTrue(os.path.exists(calendar_charts[chart_name]),
+                               f"Chart file {chart_name} should exist")
+                logger.info(f"   ✅ {chart_name}: {calendar_charts[chart_name]}")
+
+        # Genera anche i grafici standard per confronto
+        standard_charts = visualizer.generate_all_charts()
+
+        # Combina tutti i grafici
+        all_charts = {**standard_charts, **calendar_charts}
+
+        # ============================================================================
+        # ANALISI DISTRIBUZIONE CALENDARIO
+        # ============================================================================
+
+        logger.info("📈 Analisi distribuzione calendario...")
+
+        # Calcola metriche di distribuzione calendario
+        calendar_metrics = self._calculate_calendar_distribution_metrics(solution_df, tasks_df)
+
+        # Log metriche calendario
+        logger.info(f"📅 Calendar Distribution Metrics:")
+        logger.info(f"   Daily Concentration Max: {calendar_metrics['daily_concentration_max']:.1f}%")
+        logger.info(f"   Hourly Concentration Max: {calendar_metrics['hourly_concentration_max']:.1f}%")
+        logger.info(f"   Resource Balance: {calendar_metrics['resource_balance']:.1f}%")
+        logger.info(f"   Weekend Usage: {calendar_metrics['weekend_usage']:.1f}%")
+        logger.info(f"   Priority Timeline Compliance: {calendar_metrics['priority_timeline_compliance']:.1f}%")
+
+        # ============================================================================
+        # VERIFICA SOGLIE DISTRIBUZIONE CALENDARIO
+        # ============================================================================
+
+        # Usa soglie centralizzate per calendar distribution
+        thresholds = CALENDAR_DISTRIBUTION_THRESHOLDS
+
+        # Assertions per qualità generale
+        self.assertGreaterEqual(quality_metrics['sqs'], thresholds['sqs_min'],
+                               f"SQS should be >= {thresholds['sqs_min']}% for calendar test, got {quality_metrics['sqs']:.2f}%")
+        self.assertGreaterEqual(quality_metrics['completeness'], thresholds['completeness_min'],
+                               f"Completeness should be >= {thresholds['completeness_min']}%, got {quality_metrics['completeness']:.2f}%")
+        self.assertLess(execution_time, thresholds['max_execution_time'],
+                       f"Execution should be < {thresholds['max_execution_time']}s on M4, got {execution_time:.2f}s")
+
+        # Assertions per distribuzione calendario
+        self.assertLessEqual(calendar_metrics['daily_concentration_max'], thresholds['max_daily_concentration'],
+                            f"Daily concentration should be <= {thresholds['max_daily_concentration']}%, got {calendar_metrics['daily_concentration_max']:.1f}%")
+        self.assertLessEqual(calendar_metrics['hourly_concentration_max'], thresholds['max_hourly_concentration'],
+                            f"Hourly concentration should be <= {thresholds['max_hourly_concentration']}%, got {calendar_metrics['hourly_concentration_max']:.1f}%")
+        self.assertGreaterEqual(calendar_metrics['resource_balance'], thresholds['min_resource_balance'],
+                               f"Resource balance should be >= {thresholds['min_resource_balance']}%, got {calendar_metrics['resource_balance']:.1f}%")
+        self.assertLessEqual(calendar_metrics['weekend_usage'], thresholds['max_weekend_usage'],
+                            f"Weekend usage should be <= {thresholds['max_weekend_usage']}%, got {calendar_metrics['weekend_usage']:.1f}%")
+        self.assertGreaterEqual(calendar_metrics['priority_timeline_compliance'], thresholds['priority_timeline_compliance'],
+                               f"Priority timeline compliance should be >= {thresholds['priority_timeline_compliance']}%, got {calendar_metrics['priority_timeline_compliance']:.1f}%")
+
+        # ============================================================================
+        # GENERA DASHBOARD AGGIORNATA
+        # ============================================================================
+
+        logger.info("📊 Generazione dashboard aggiornata...")
+
+        # Crea dashboard HTML con tutti i grafici (standard + calendario)
+        dashboard_path = visualizer.create_enhanced_summary_report(all_charts)
+
+        self.assertTrue(os.path.exists(dashboard_path), "Dashboard HTML should be created")
+        logger.info(f"   ✅ Dashboard: {dashboard_path}")
+
+        # ============================================================================
+        # RISULTATI FINALI
+        # ============================================================================
+
+        logger.info("🎉 Test calendario completato con successo!")
+        logger.info(f"📁 Grafici generati: {len(all_charts)}")
+        logger.info(f"📊 Dashboard: {os.path.basename(dashboard_path)}")
+
+        # Verifica che tutti i file esistano
+        for chart_name, chart_path in all_charts.items():
+            if chart_path:
+                self.assertTrue(os.path.exists(chart_path), f"Chart {chart_name} file should exist")
+
+    def _calculate_calendar_distribution_metrics(self, solution_df, tasks_df):
+        """Calcola metriche specifiche per la distribuzione calendario"""
+
+        if solution_df is None or solution_df.empty:
+            return {
+                'daily_concentration_max': 0.0,
+                'hourly_concentration_max': 0.0,
+                'resource_balance': 0.0,
+                'weekend_usage': 0.0,
+                'priority_timeline_compliance': 0.0
+            }
+
+        # Prepara i dati
+        solution_copy = solution_df.copy()
+        solution_copy['datetime'] = pd.to_datetime(solution_copy['date'])
+        solution_copy['weekday'] = solution_copy['datetime'].dt.dayofweek
+
+        total_tasks = len(solution_copy)
+
+        # 1. Daily Concentration Max (% massima di task in un singolo giorno)
+        daily_counts = solution_copy.groupby('date').size()
+        daily_concentration_max = (daily_counts.max() / total_tasks) * 100 if total_tasks > 0 else 0
+
+        # 2. Hourly Concentration Max (% massima di task in una singola ora)
+        hourly_counts = solution_copy.groupby('hour').size()
+        hourly_concentration_max = (hourly_counts.max() / total_tasks) * 100 if total_tasks > 0 else 0
+
+        # 3. Resource Balance (bilanciamento tra risorse)
+        resource_counts = solution_copy.groupby('user_id').size()
+        if len(resource_counts) > 1:
+            mean_tasks = resource_counts.mean()
+            std_tasks = resource_counts.std()
+            cv = std_tasks / mean_tasks if mean_tasks > 0 else 0
+            resource_balance = max(0, (1 - cv)) * 100
+        else:
+            resource_balance = 100.0
+
+        # 4. Weekend Usage (% task nel weekend)
+        weekend_tasks = solution_copy[solution_copy['weekday'].isin([5, 6])]  # Sabato=5, Domenica=6
+        weekend_usage = (len(weekend_tasks) / total_tasks) * 100 if total_tasks > 0 else 0
+
+        # 5. Priority Timeline Compliance (task alta priorità schedulati presto)
+        # Merge con tasks per ottenere priorità
+        merged_df = solution_copy.merge(
+            tasks_df[['id', 'priority_score']].rename(columns={'id': 'task_id'}),
+            on='task_id',
+            how='left'
+        )
+
+        if not merged_df.empty and 'priority_score' in merged_df.columns:
+            # Task alta priorità (>=80)
+            high_priority_tasks = merged_df[merged_df['priority_score'] >= 80]
+
+            if len(high_priority_tasks) > 0:
+                # Calcola giorno medio per task alta priorità
+                high_priority_tasks['day_num'] = (high_priority_tasks['datetime'] - high_priority_tasks['datetime'].min()).dt.days
+                avg_day_high = high_priority_tasks['day_num'].mean()
+
+                # Calcola giorno medio per tutti i task
+                merged_df['day_num'] = (merged_df['datetime'] - merged_df['datetime'].min()).dt.days
+                avg_day_all = merged_df['day_num'].mean()
+
+                # Compliance = quanto prima sono schedulati i task alta priorità
+                if avg_day_all > 0:
+                    priority_timeline_compliance = max(0, (1 - avg_day_high / avg_day_all)) * 100
+                else:
+                    priority_timeline_compliance = 100.0
+            else:
+                priority_timeline_compliance = 100.0  # Nessun task alta priorità
+        else:
+            priority_timeline_compliance = 0.0
+
+        return {
+            'daily_concentration_max': round(daily_concentration_max, 1),
+            'hourly_concentration_max': round(hourly_concentration_max, 1),
+            'resource_balance': round(resource_balance, 1),
+            'weekend_usage': round(weekend_usage, 1),
+            'priority_timeline_compliance': round(priority_timeline_compliance, 1)
+        }
 
 
 if __name__ == '__main__':

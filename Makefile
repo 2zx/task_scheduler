@@ -58,6 +58,10 @@ test-stress: ## Test di stress con 500 task
 	@echo "💪 Running stress test..."
 	$(PYTEST) tests/test_scheduling_quality.py::TestSchedulingQuality::test_500_tasks_stress_quality -v -s
 
+test-calendar-viz: ## Test con visualizzazioni calendario complete
+	@echo "📅 Testing calendar distribution visualization..."
+	$(PYTEST) tests/test_scheduling_quality.py::TestCalendarDistributionVisualization::test_calendar_distribution_visualization -v -s
+
 test-all: ## Esegue tutti i test di qualità
 	@echo "🔬 Running all quality tests..."
 	$(PYTEST) tests/test_scheduling_quality.py -v -s
@@ -176,6 +180,127 @@ docker-report: ## Genera report in container Docker
 
 ci-test: setup lint test-all ## Pipeline completa per CI/CD
 	@echo "🚀 CI/CD pipeline completed!"
+
+profile-demo: ## Demo completo del sistema di profilazione
+	@echo "🔍 Demo Sistema di Profilazione Centralizzato..."
+	$(PYTHON) src/scheduler/profile_example.py
+
+profile-quick: ## Profilazione rapida con quick-test
+	@echo "🔍 Profilazione rapida..."
+	@$(PYTHON) -c "\
+from src.scheduler.profiler import SchedulingProfiler; \
+from src.scheduler.model import SchedulingModel; \
+from tests.realistic_data_generator import generate_scenario; \
+print('🧪 Profilazione Quick Test: 30 task, 3 risorse'); \
+tasks_df, calendar_df, leaves_df = generate_scenario('production', num_tasks=30, num_resources=3); \
+model = SchedulingModel(tasks_df, calendar_df, leaves_df); \
+success = model.solve(); \
+if success: \
+    solution_df = model.get_solution_dataframe(); \
+    stats = model.get_solver_statistics(); \
+    profiler = SchedulingProfiler('$(REPORTS_DIR)'); \
+    profile = profiler.profile_solution(solution_df, tasks_df, stats); \
+    quality = profile['quality_metrics']; \
+    print(f'📊 SQS: {quality[\"sqs\"]:.1f}% | Completeness: {quality[\"completeness\"]:.1f}% | Priority: {quality[\"priority_compliance\"]:.1f}%'); \
+    json_file = profiler.export_json(profile, 'quick_profile.json'); \
+    print(f'💾 Report salvato: {json_file}'); \
+else: \
+    print('❌ Scheduling fallito')"
+
+profile-priority: ## Profilazione specifica per priorità
+	@echo "🎯 Profilazione Priority Compliance..."
+	@$(PYTHON) -c "\
+from src.scheduler.profiler import SchedulingProfiler; \
+from src.scheduler.model import SchedulingModel; \
+import pandas as pd; \
+print('🧪 Test Priority Compliance: 20 task con priorità definite'); \
+tasks_data = []; \
+for i in range(1, 21): \
+    priority = 90.0 if i <= 5 else (60.0 if i <= 12 else 30.0); \
+    tasks_data.append({'id': i, 'name': f'Task_{i:02d}', 'user_id': (i % 3) + 1, 'remaining_hours': 4.0, 'priority_score': priority}); \
+tasks_df = pd.DataFrame(tasks_data); \
+calendar_data = []; \
+for task_id in range(1, 21): \
+    for day in range(5): \
+        calendar_data.append({'task_id': task_id, 'dayofweek': day, 'hour_from': 9, 'hour_to': 17}); \
+calendar_df = pd.DataFrame(calendar_data); \
+leaves_df = pd.DataFrame(); \
+model = SchedulingModel(tasks_df, calendar_df, leaves_df); \
+success = model.solve(); \
+if success: \
+    solution_df = model.get_solution_dataframe(); \
+    stats = model.get_solver_statistics(); \
+    profiler = SchedulingProfiler('$(REPORTS_DIR)'); \
+    profile = profiler.profile_solution(solution_df, tasks_df, stats); \
+    priority_analysis = profile['priority_analysis']; \
+    print(f'🎯 Priority Compliance: {priority_analysis[\"overall_compliance\"]:.1f}%'); \
+    for pclass, pstats in priority_analysis['by_priority_class'].items(): \
+        print(f'   {pclass.upper()}: {pstats[\"completion_rate\"]:.1f}% completati, {pstats[\"compliance_rate\"]:.1f}% compliance'); \
+    violations = profile['violations']['priority_violations']; \
+    print(f'⚠️ Violazioni priorità: {len(violations)}'); \
+    csv_file = profiler.export_csv(profile, 'priority_analysis.csv'); \
+    print(f'💾 Analisi salvata: {csv_file}'); \
+else: \
+    print('❌ Scheduling fallito')"
+
+profile-dashboard: ## Genera dashboard HTML completo
+	@echo "🌐 Generazione Dashboard HTML..."
+	@$(PYTHON) -c "\
+from src.scheduler.profiler import SchedulingProfiler; \
+from src.scheduler.model import SchedulingModel; \
+from tests.realistic_data_generator import generate_scenario; \
+print('🌐 Generazione Dashboard: 100 task scenario produzione'); \
+tasks_df, calendar_df, leaves_df = generate_scenario('production', num_tasks=100, num_resources=8); \
+model = SchedulingModel(tasks_df, calendar_df, leaves_df); \
+success = model.solve(); \
+if success: \
+    solution_df = model.get_solution_dataframe(); \
+    stats = model.get_solver_statistics(); \
+    profiler = SchedulingProfiler('$(REPORTS_DIR)'); \
+    profile = profiler.profile_solution(solution_df, tasks_df, stats); \
+    html_file = profiler.export_html_dashboard(profile, 'dashboard.html'); \
+    json_file = profiler.export_json(profile, 'dashboard_data.json'); \
+    print(f'🌐 Dashboard HTML: {html_file}'); \
+    print(f'📄 Dati JSON: {json_file}'); \
+    print(f'💡 Apri: file://{html_file}'); \
+else: \
+    print('❌ Scheduling fallito')"
+
+profile-compare: ## Confronta Greedy vs OrTools
+	@echo "⚖️ Confronto Algoritmi: Greedy vs OrTools..."
+	@echo "🔄 Test in corso... (può richiedere tempo)"
+	@$(PYTHON) -c "\
+from src.scheduler.profiler import SchedulingProfiler; \
+from src.scheduler.model import SchedulingModel; \
+from tests.realistic_data_generator import generate_scenario; \
+import json; \
+print('⚖️ Confronto Greedy vs OrTools: 80 task'); \
+tasks_df, calendar_df, leaves_df = generate_scenario('production', num_tasks=80, num_resources=6); \
+profiler = SchedulingProfiler('$(REPORTS_DIR)'); \
+results = {}; \
+for algo_name in ['Greedy', 'OrTools']: \
+    print(f'🧪 Test {algo_name}...'); \
+    model = SchedulingModel(tasks_df, calendar_df, leaves_df); \
+    success = model.solve(); \
+    if success: \
+        solution_df = model.get_solution_dataframe(); \
+        stats = model.get_solver_statistics(); \
+        profile = profiler.profile_solution(solution_df, tasks_df, stats); \
+        results[algo_name] = profile['quality_metrics']; \
+        results[algo_name]['algorithm'] = stats.get('algorithm', 'unknown'); \
+        results[algo_name]['execution_time'] = stats.get('execution_time', 0); \
+    else: \
+        results[algo_name] = {'error': 'Scheduling failed'}; \
+print('\\n📊 CONFRONTO RISULTATI:'); \
+print('=' * 50); \
+for algo, metrics in results.items(): \
+    if 'error' not in metrics: \
+        print(f'{algo:>8}: SQS={metrics[\"sqs\"]:5.1f}% | Priority={metrics[\"priority_compliance\"]:5.1f}% | Time={metrics[\"execution_time\"]:6.3f}s'); \
+    else: \
+        print(f'{algo:>8}: {metrics[\"error\"]}'); \
+with open('$(REPORTS_DIR)/algorithm_comparison.json', 'w') as f: \
+    json.dump(results, f, indent=2); \
+print('💾 Confronto salvato: $(REPORTS_DIR)/algorithm_comparison.json')"
 
 info: ## Mostra informazioni sistema
 	@echo "📋 System Information:"

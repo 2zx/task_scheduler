@@ -404,7 +404,116 @@ docker-compose restart task-scheduler-api
 docker-compose down
 ```
 
-## 🧪 Testing e Benchmark
+## 🧪 Testing, Benchmark e Profilazione
+
+### Sistema di Profilazione Centralizzato
+
+Il sistema include un **profiler centralizzato** (`src/scheduler/profiler.py`) che fornisce analisi dettagliate di qualità, priorità, risorse e performance per qualsiasi soluzione di scheduling.
+
+#### 🎯 Comandi di Profilazione
+
+```bash
+# Demo completo del sistema di profilazione
+make profile-demo
+
+# Profilazione rapida (30 task, 3 risorse)
+make profile-quick
+
+# Analisi specifica priority compliance
+make profile-priority
+
+# Dashboard HTML completo (100 task)
+make profile-dashboard
+
+# Confronto algoritmi Greedy vs OrTools
+make profile-compare
+```
+
+#### 📊 Metriche Centralizzate
+
+Il profiler analizza automaticamente:
+
+**Quality Metrics**
+- **SQS (Schedule Quality Score)**: Metrica principale combinata
+- **Completeness**: Percentuale task schedulati
+- **Priority Compliance**: Rispetto ordine priorità (dettagliato per fascia)
+- **Resource Efficiency**: Bilanciamento utilizzo risorse
+
+**Priority Analysis** (Focus principale)
+- Analisi per fascia: Alta (≥80), Media (50-79), Bassa (<50)
+- Violazioni specifiche con dettagli temporali
+- Compliance rate per ogni classe di priorità
+- Raccomandazioni automatiche per miglioramenti
+
+**Resource Analysis**
+- Statistiche per risorsa (task, ore, priorità media)
+- Bilanciamento del carico di lavoro
+- Utilizzo giornaliero e picchi
+
+**Temporal Analysis**
+- Distribuzione temporale delle attività
+- Concentrazione e gap temporali
+- Anomalie nella pianificazione
+
+**Algorithm Performance**
+- Tempo di esecuzione e velocità (task/secondo)
+- Efficienza algoritmo (excellent/good/fair/poor)
+- Statistiche memoria e estensioni orizzonte
+
+**Violations Detection**
+- Conflitti di risorse (sovrapposizioni)
+- Violazioni di priorità con severity
+- Anomalie temporali (gap > 48h)
+
+#### 🚀 Utilizzo del Profiler
+
+**API Programmatica**
+```python
+from src.scheduler.profiler import SchedulingProfiler
+
+# Inizializza profiler
+profiler = SchedulingProfiler(output_dir="reports")
+
+# Profila una soluzione completa
+profile = profiler.profile_solution(solution_df, tasks_df, algorithm_stats)
+
+# Export in multipli formati
+json_file = profiler.export_json(profile)           # Dati completi
+csv_file = profiler.export_csv(profile)             # Metriche principali
+html_file = profiler.export_html_dashboard(profile) # Dashboard visuale
+```
+
+**Esempio Output**
+```
+📈 RISULTATI PROFILAZIONE
+🎯 Schedule Quality Score: 86.8%
+📊 Completeness: 98.0%
+🔥 Priority Compliance: 77.8%
+⚖️ Resource Efficiency: 82.5%
+
+🎯 ANALISI PRIORITÀ
+HIGH: 10/10 task (100.0% completati, 95.1% compliance)
+MEDIUM: 15/15 task (100.0% completati, 87.7% compliance)
+LOW: 24/25 task (96.0% completati, 70.2% compliance)
+
+⚡ PERFORMANCE ALGORITMO
+Algoritmo: greedy
+Tempo esecuzione: 0.026s
+Task/secondo: 1,850.6
+Efficienza: excellent
+
+⚠️ VIOLAZIONI RILEVATE
+Violazioni priorità: 261
+Conflitti risorse: 0
+Anomalie temporali: 26
+```
+
+#### 📁 File Generati
+
+Il profiler genera automaticamente:
+- **JSON**: `profile_YYYYMMDD_HHMMSS.json` - Dati completi per analisi programmatica
+- **CSV**: `profile_YYYYMMDD_HHMMSS.csv` - Metriche principali per Excel/analisi
+- **HTML**: `dashboard_YYYYMMDD_HHMMSS.html` - Dashboard interattivo con grafici
 
 ### Test di Qualità del Prodotto
 
@@ -416,7 +525,7 @@ Il sistema include una suite completa di test per verificare la qualità della p
 # Setup ambiente di test
 make setup
 
-# Test rapido (50 task)
+# Test rapido (50 task) con profilazione
 make quick-test
 
 # Test qualità completo (100 task)
@@ -683,6 +792,373 @@ LOG_LEVEL=INFO     # Informazioni principali (default)
 LOG_LEVEL=WARNING  # Solo avvisi ed errori
 LOG_LEVEL=ERROR    # Solo errori
 ```
+
+## 📊 Soglie di Accettabilità - Guida Completa
+
+Questo documento descrive dove sono definite e come modificare tutte le soglie di accettabilità utilizzate dal sistema di Task Scheduler per test e profilazione.
+
+## 🎯 File Principale: `src/config_thresholds.py`
+
+**Tutte le soglie sono centralizzate in questo file unico** per facilitare manutenzione e modifiche.
+
+### 📋 Struttura delle Soglie
+
+#### 1. **Priority Compliance**
+```python
+# Classificazione priorità
+PRIORITY_CLASSIFICATION = {
+    'high': 80,      # Priorità >= 80 = Alta
+    'medium': 50,    # Priorità >= 50 = Media
+    'low': 0         # Priorità >= 0 = Bassa
+}
+
+# Soglie accettabilità Priority Compliance
+PRIORITY_COMPLIANCE_THRESHOLDS = {
+    'excellent': 85.0,    # >= 85% = Eccellente
+    'good': 70.0,         # >= 70% = Buono
+    'acceptable': 50.0,   # >= 50% = Accettabile
+    'poor': 0.0           # < 50% = Scarso
+}
+```
+
+#### 2. **Schedule Quality Score (SQS)**
+```python
+# Pesi per calcolo SQS
+SQS_WEIGHTS = {
+    'completeness': 0.4,        # 40% peso completezza
+    'priority_compliance': 0.4, # 40% peso priorità
+    'resource_efficiency': 0.2  # 20% peso efficienza risorse
+}
+
+# Soglie qualità SQS
+SQS_THRESHOLDS = {
+    'excellent': 80.0,    # >= 80% = Eccellente ✅
+    'good': 60.0,         # >= 60% = Buono ⚠️
+    'acceptable': 40.0,   # >= 40% = Accettabile
+    'poor': 0.0           # < 40% = Scarso ❌
+}
+```
+
+#### 3. **Soglie per Scenario di Test**
+```python
+# Scenario Produzione (100 task, 10 risorse)
+PRODUCTION_SCENARIO_THRESHOLDS = {
+    'sqs_min': 75.0,                    # SQS >= 75%
+    'completeness_min': 80.0,           # Completeness >= 80%
+    'priority_compliance_min': 70.0,    # Priority Compliance >= 70%
+    'resource_efficiency_min': 50.0,    # Resource Efficiency >= 50%
+    'max_execution_time': 10.0          # Tempo <= 10s (MacBook M4)
+}
+
+# Scenario Carico Elevato (200 task, 10 risorse)
+HIGH_LOAD_SCENARIO_THRESHOLDS = {
+    'sqs_min': 65.0,                    # SQS >= 65%
+    'completeness_min': 70.0,           # Completeness >= 70%
+    'priority_compliance_min': 80.0,    # Priority Compliance >= 80%
+    'resource_efficiency_min': 40.0,    # Resource Efficiency >= 40%
+    'max_execution_time': 20.0          # Tempo <= 20s (MacBook M4)
+}
+
+# Scenario Stress (500 task, 10 risorse)
+STRESS_SCENARIO_THRESHOLDS = {
+    'sqs_min': 50.0,                    # SQS >= 50%
+    'completeness_min': 60.0,           # Completeness >= 60%
+    'priority_compliance_min': 60.0,    # Priority Compliance >= 60%
+    'resource_efficiency_min': 30.0,    # Resource Efficiency >= 30%
+    'max_execution_time': 60.0          # Tempo <= 60s (MacBook M4)
+}
+```
+
+#### 4. **Benchmark Performance (MacBook Pro M4)**
+```python
+BENCHMARK_M4_THRESHOLDS = [
+    {
+        'tasks': 50,
+        'expected_time': 5.0,      # <= 5s
+        'expected_sqs': 60.0,      # >= 60%
+        'expected_memory': 500     # <= 500MB
+    },
+    {
+        'tasks': 100,
+        'expected_time': 10.0,     # <= 10s
+        'expected_sqs': 55.0,      # >= 55%
+        'expected_memory': 1000    # <= 1GB
+    },
+    {
+        'tasks': 200,
+        'expected_time': 30.0,     # <= 30s
+        'expected_sqs': 50.0,      # >= 50%
+        'expected_memory': 2000    # <= 2GB
+    }
+]
+```
+
+## 🔧 Come Modificare le Soglie
+
+### 1. **Modifica Diretta**
+Edita il file `src/config_thresholds.py` e modifica i valori desiderati:
+
+```python
+# Esempio: Rendere più stringenti i test di produzione
+PRODUCTION_SCENARIO_THRESHOLDS = {
+    'sqs_min': 80.0,                    # Era 75.0
+    'completeness_min': 85.0,           # Era 80.0
+    'priority_compliance_min': 75.0,    # Era 70.0
+    'resource_efficiency_min': 60.0,    # Era 50.0
+    'max_execution_time': 8.0           # Era 10.0
+}
+```
+
+### 2. **Utilizzo Programmatico**
+```python
+from src.config_thresholds import get_scenario_thresholds
+
+# Ottieni soglie per uno scenario
+thresholds = get_scenario_thresholds('production')
+print(f"SQS minimo: {thresholds['sqs_min']}%")
+
+# Verifica se generare raccomandazione
+from src.config_thresholds import should_generate_recommendation
+if should_generate_recommendation('priority_compliance', 75.0):
+    print("Genera raccomandazione per priority compliance")
+```
+
+## 📍 Dove Vengono Utilizzate
+
+### 1. **Test di Qualità** (`tests/test_scheduling_quality.py`)
+```python
+from src.config_thresholds import PRODUCTION_SCENARIO_THRESHOLDS
+
+# Usa soglie centralizzate nei test
+thresholds = PRODUCTION_SCENARIO_THRESHOLDS
+self.assertGreaterEqual(quality_metrics['sqs'], thresholds['sqs_min'])
+```
+
+### 2. **Sistema di Profilazione** (`src/scheduler/profiler.py`)
+```python
+from src.config_thresholds import (
+    PRIORITY_CLASSIFICATION,
+    RECOMMENDATION_THRESHOLDS,
+    should_generate_recommendation
+)
+
+# Usa soglie per classificazione priorità
+if priority_score >= PRIORITY_CLASSIFICATION['high']:
+    return 'high'
+
+# Usa soglie per raccomandazioni
+if should_generate_recommendation('priority_compliance', value):
+    recommendations.append("Migliora priority compliance")
+```
+
+### 3. **Comandi Makefile**
+I comandi di test utilizzano automaticamente le soglie centralizzate:
+```bash
+make test-quality          # Usa PRODUCTION_SCENARIO_THRESHOLDS
+make test-stress           # Usa STRESS_SCENARIO_THRESHOLDS
+make benchmark-m4          # Usa BENCHMARK_M4_THRESHOLDS
+```
+
+## 🎯 Soglie Specifiche per Metrica
+
+### **Priority Compliance**
+- **Eccellente**: ≥ 85%
+- **Buono**: ≥ 70%
+- **Accettabile**: ≥ 50%
+- **Scarso**: < 50%
+
+### **Schedule Quality Score (SQS)**
+- **Eccellente**: ≥ 80% ✅
+- **Buono**: ≥ 60% ⚠️
+- **Accettabile**: ≥ 40%
+- **Scarso**: < 40% ❌
+
+### **Completeness**
+- **Eccellente**: ≥ 95%
+- **Buono**: ≥ 85%
+- **Accettabile**: ≥ 70%
+- **Scarso**: < 70%
+
+### **Resource Efficiency**
+- **Eccellente**: ≥ 80%
+- **Buono**: ≥ 60%
+- **Accettabile**: ≥ 40%
+- **Scarso**: < 40%
+
+## ⚡ Performance (MacBook Pro M4)
+
+### **Tempi di Esecuzione Attesi**
+| Task | Tempo Max | SQS Min | Memoria Max |
+|------|-----------|---------|-------------|
+| 50   | 5s        | 60%     | 500MB       |
+| 100  | 10s       | 55%     | 1GB         |
+| 200  | 30s       | 50%     | 2GB         |
+
+### **Efficienza Algoritmo**
+- **Excellent**: < 0.01s per task
+- **Good**: < 0.05s per task
+- **Fair**: < 0.1s per task
+- **Poor**: ≥ 0.1s per task
+
+## 🚨 Anomalie e Violazioni
+
+### **Anomalie Temporali**
+```python
+TEMPORAL_ANOMALY_THRESHOLDS = {
+    'large_gap_hours': 48.0,      # Gap > 48h = anomalia
+    'concentration_max': 80.0     # Concentrazione > 80% = anomalia
+}
+```
+
+### **Conflitti Risorse**
+```python
+RESOURCE_CONFLICT_THRESHOLDS = {
+    'max_conflicts': 0,           # 0 conflitti accettabili
+    'max_overlaps_per_resource': 0 # 0 sovrapposizioni per risorsa
+}
+```
+
+### **Violazioni Severe**
+```python
+SEVERE_PRIORITY_VIOLATION_THRESHOLD = 30.0  # Gap priorità > 30 = violazione severa
+```
+
+## 💡 Raccomandazioni Automatiche
+
+### **Soglie per Raccomandazioni**
+```python
+RECOMMENDATION_THRESHOLDS = {
+    'priority_compliance_warning': 80.0,    # < 80% → raccomandazione priorità
+    'resource_efficiency_warning': 60.0,    # < 60% → raccomandazione risorse
+    'completeness_warning': 90.0,           # < 90% → raccomandazione orizzonte
+    'high_priority_completion_warning': 95.0, # < 95% → raccomandazione task critici
+    'severe_violations_warning': 5          # > 5 violazioni severe → raccomandazione
+}
+```
+
+## 🔄 Funzioni Helper
+
+### **Valutazione Qualità**
+```python
+from src.config_thresholds import evaluate_sqs_quality
+
+quality_level = evaluate_sqs_quality(85.0)  # Returns: 'excellent'
+```
+
+### **Soglie per Scenario**
+```python
+from src.config_thresholds import get_scenario_thresholds
+
+thresholds = get_scenario_thresholds('production')
+# Returns: PRODUCTION_SCENARIO_THRESHOLDS
+```
+
+### **Controllo Raccomandazioni**
+```python
+from src.config_thresholds import should_generate_recommendation
+
+if should_generate_recommendation('priority_compliance', 75.0):
+    # Genera raccomandazione perché 75.0 < 80.0 (soglia warning)
+    pass
+```
+
+## 📝 Best Practices
+
+### 1. **Modifica Centralizzata**
+- ✅ Modifica sempre `src/config_thresholds.py`
+- ❌ Non hardcodare soglie nei singoli file
+
+### 2. **Test delle Modifiche**
+```bash
+# Testa le modifiche
+make test-quality
+make profile-demo
+
+# Verifica benchmark
+make benchmark-m4
+```
+
+### 3. **Documentazione**
+- Documenta il motivo delle modifiche
+- Aggiorna questo file se necessario
+- Testa su scenari diversi
+
+### 4. **Backup**
+- Salva le soglie precedenti prima di modificare
+- Testa gradualmente le nuove soglie
+- Monitora l'impatto sui test esistenti
+
+## 🎯 Esempi Pratici
+
+### **Scenario 1: Test Troppo Permissivi**
+```python
+# Prima (troppo permissivo)
+PRODUCTION_SCENARIO_THRESHOLDS = {
+    'sqs_min': 60.0,  # Troppo basso
+}
+
+# Dopo (più stringente)
+PRODUCTION_SCENARIO_THRESHOLDS = {
+    'sqs_min': 75.0,  # Più realistico
+}
+```
+
+### **Scenario 2: Performance Lente**
+```python
+# Prima (troppo ottimistico)
+BENCHMARK_M4_THRESHOLDS = [
+    {'tasks': 100, 'expected_time': 5.0}  # Troppo veloce
+]
+
+# Dopo (più realistico)
+BENCHMARK_M4_THRESHOLDS = [
+    {'tasks': 100, 'expected_time': 10.0}  # Più realistico
+]
+```
+
+### **Scenario 3: Priority Compliance Basso**
+```python
+# Abbassa soglia se il sistema ha limitazioni strutturali
+PRIORITY_COMPLIANCE_THRESHOLDS = {
+    'good': 60.0,  # Era 70.0
+}
+```
+
+## 🔍 Monitoraggio
+
+### **Comandi per Verificare Soglie**
+```bash
+# Test con soglie attuali
+make test-all
+
+# Profilazione dettagliata
+make profile-demo
+
+# Benchmark performance
+make benchmark-m4
+
+# Report completo
+make generate-report
+```
+
+### **Log delle Soglie**
+Il sistema logga automaticamente le soglie utilizzate:
+```
+📊 Quality Metrics:
+   SQS: 85.2% (Soglia: 75.0%) ✅
+   Priority Compliance: 77.8% (Soglia: 70.0%) ✅
+   Completeness: 98.0% (Soglia: 80.0%) ✅
+```
+
+---
+
+## 📞 Supporto
+
+Per domande sulle soglie:
+1. Consulta questo documento
+2. Verifica `src/config_thresholds.py`
+3. Testa con `make profile-demo`
+4. Controlla i log per dettagli
 
 ## 🚨 Troubleshooting
 
